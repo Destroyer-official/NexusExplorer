@@ -12,6 +12,7 @@ Thumbs.db
 .agents/
 .pytest_cache/
 __pycache__/
+*.pyc
 .playwright-mcp/
 scratch/
 audit_artifacts/
