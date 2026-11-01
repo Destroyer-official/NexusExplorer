@@ -1,0 +1,44 @@
+[package]
+name = "nexus-core"
+version.workspace = true
+edition.workspace = true
+description = "Platform-focused core engine for Nexus Explorer (filesystem, search, transfers, state)"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+tokio = { version = "1.53", features = ["sync", "rt", "time", "fs", "io-util", "macros", "net"] }
+jwalk = "0.8"
+trash = "5.2"
+dirs = "6"
+sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.10"
+crc32fast = "1"
+blake3 = "1"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp", "gif"] }
+regex = "1.11"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+flate2 = "1.0"
+aes-gcm = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_RestartManager",
+  "Win32_System_Threading",
+  "Win32_System_SystemInformation",
+  "Win32_System_Diagnostics_Debug",
+] }
+
+[dev-dependencies]
+tempfile = "3"

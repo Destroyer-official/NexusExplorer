@@ -1,0 +1,29 @@
+# Dependencies & Build Targets
+node_modules/
+dist/
+target/
+src-tauri/target/
+
+# System & Cache Files
+*.log
+.DS_Store
+Thumbs.db
+.nexus/
+.agents/
+.pytest_cache/
+__pycache__/
+.playwright-mcp/
+scratch/
+audit_artifacts/
+
+# Test output and scratch media
+*_verified.png
+chrome_browser_screenshot.png
+current_state.png
+readme_quicklook.png
+screenshot.png
+
+# Scratch / Test scripts
+test_explorer.py
+pytest.ini
+__init__.py
