@@ -342,3 +342,89 @@ impl AiAgentManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_ai_agent_plan_formulation() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Create sample files
+        fs::write(path.join("document1.pdf"), "sample pdf content").unwrap();
+        fs::write(path.join("document2.pdf"), "sample pdf content 2").unwrap();
+        fs::write(path.join("image.png"), "sample png bytes").unwrap();
+
+        let agent = AiAgentManager::new();
+
+        // Test organizing PDF files
+        let plan = agent
+            .formulate_plan("organize pdf files by extension", path)
+            .expect("Should formulate plan");
+
+        assert_eq!(plan.action_kind, "organize_by_extension");
+        assert_eq!(plan.matched_files.len(), 2);
+        assert!(!plan.is_destructive);
+        assert!(plan.safety_score > 0.8);
+    }
+
+    #[test]
+    fn test_ai_agent_execution_and_rl_feedback() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Create sample files for compression
+        fs::write(path.join("file1.log"), "log line 1\n").unwrap();
+        fs::write(path.join("file2.log"), "log line 2\n").unwrap();
+
+        let agent = AiAgentManager::new();
+
+        // 1. Formulate plan to archive files
+        let plan = agent
+            .formulate_plan("compress log files to zip", path)
+            .expect("Should formulate archive plan");
+
+        assert_eq!(plan.action_kind, "archive_zip");
+        assert_eq!(plan.matched_files.len(), 2);
+
+        // 2. Execute plan
+        let result = agent
+            .execute_plan(&plan, path)
+            .expect("Should execute archive plan successfully");
+
+        assert!(result.success);
+        assert_eq!(result.processed_count, 2);
+
+        // 3. Record positive RL reward
+        agent.record_feedback(&plan.action_kind, 1.0);
+
+        // Verify ZIP archive was created
+        let archives: Vec<_> = fs::read_dir(path)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "zip"))
+            .collect();
+
+        assert_eq!(archives.len(), 1, "Expected 1 zip archive to be created");
+    }
+
+    #[test]
+    fn test_ai_agent_safety_verification_blocks_destructive_without_confirm() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        fs::write(path.join("sensitive.key"), "SUPER_SECRET_KEY").unwrap();
+
+        let agent = AiAgentManager::new();
+        let plan = agent
+            .formulate_plan("shred key files", path)
+            .expect("Should formulate shred plan");
+
+        assert_eq!(plan.action_kind, "shred");
+        assert!(plan.is_destructive);
+        assert!(plan.requires_explicit_confirm);
+    }
+}
