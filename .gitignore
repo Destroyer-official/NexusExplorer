@@ -22,8 +22,3 @@ chrome_browser_screenshot.png
 current_state.png
 readme_quicklook.png
 screenshot.png
-
-# Scratch / Test scripts
-test_explorer.py
-pytest.ini
-__init__.py
