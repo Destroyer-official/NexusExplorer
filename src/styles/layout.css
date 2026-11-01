@@ -4,8 +4,8 @@
 .brand-mark { width:22px; height:22px; border-radius:6px; background: linear-gradient(135deg, var(--accent), var(--accent-soft)); display:grid; place-items:center; color:#fff; font-weight:800; font-size:12px; box-shadow: 0 0 12px var(--accent-glow); }
 .brand-name { font-size:13px; font-weight:600; letter-spacing:.2px; }
 .brand-sub { font-size:11px; color:var(--text-faint); margin-left:4px; }
-.titlebar-actions { display:flex; align-items:center; }
-.win-btn { width:46px; height:100%; border:none; background:transparent; color:var(--text-dim); cursor:pointer; display:grid; place-items:center; transition: background .1s, color .1s; }
+.titlebar-actions { display:flex; align-items:center; height:100%; -webkit-app-region: no-drag; z-index:10; }
+.win-btn { width:46px; height:100%; border:none; background:transparent; color:var(--text-dim); cursor:pointer; display:grid; place-items:center; transition: background .1s, color .1s; -webkit-app-region: no-drag; }
 .win-btn:hover { background:var(--hover); color:var(--text); }
 .win-btn-close:hover { background:#e81123; color:#fff; }
 

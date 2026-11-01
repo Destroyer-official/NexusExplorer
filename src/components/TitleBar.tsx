@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Minus, Square, X, Maximize2 } from "lucide-react";
 import { useAppStore } from "@/state/store";
-import { isTauri } from "@/lib/ipc";
+import { ipc, isTauri } from "@/lib/ipc";
 
 export default function TitleBar() {
   const activePath = useAppStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? "");
@@ -9,25 +9,38 @@ export default function TitleBar() {
 
   useEffect(() => {
     if (!isTauri()) return;
-    let un: (() => void) | null = null;
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      try {
-        const win = getCurrentWindow();
-        void win.isMaximized().then(setMax);
-        win.onResized(() => { void win.isMaximized().then(setMax); }).then((fn) => { un = fn; });
-      } catch {
-        // Safe off-window fallback
-      }
+    let cancelled = false;
+
+    // Check initial state
+    void ipc.windowIsMaximized().then((isMax) => {
+      if (!cancelled) setMax(Boolean(isMax));
     }).catch(() => undefined);
-    return () => { un?.(); };
+
+    // Sync maximize state on window resize
+    const handleResize = () => {
+      void ipc.windowIsMaximized().then((isMax) => {
+        if (!cancelled) setMax(Boolean(isMax));
+      }).catch(() => undefined);
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
-  const handleMin = () => {
-    if (!isTauri()) return;
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().minimize()).catch(() => undefined);
+  const handleMin = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await ipc.windowMinimize();
+    } catch {
+      // Safe fallback
+    }
   };
 
-  const handleMax = () => {
+  const handleMax = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!isTauri()) {
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
@@ -38,33 +51,47 @@ export default function TitleBar() {
       }
       return;
     }
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize()).catch(() => undefined);
+    try {
+      const isMax = await ipc.windowToggleMaximize();
+      setMax(Boolean(isMax));
+    } catch {
+      // Safe fallback
+    }
   };
 
-  const handleClose = () => {
+  const handleClose = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!isTauri()) {
       window.close();
       return;
     }
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow().close()).catch(() => undefined);
+    try {
+      await ipc.windowClose();
+    } catch {
+      // Safe fallback
+    }
   };
 
   return (
-    <div className="titlebar" data-tauri-drag-region>
+    <div className="titlebar">
       <div className="titlebar-brand" data-tauri-drag-region>
         <div className="brand-mark">N</div>
         <span className="brand-name">Nexus</span>
         <span className="brand-sub">Explorer</span>
       </div>
-      <div className="titlebar-drag" data-tauri-drag-region>
+      <div className="titlebar-drag" data-tauri-drag-region onDoubleClick={() => void handleMax()}>
         <span style={{ color: "var(--text-faint)", fontSize: 12 }}>{activePath}</span>
       </div>
-      <div className="titlebar-actions">
-        <button className="win-btn" onClick={handleMin} title="Minimize"><Minus size={14} /></button>
+      <div className="titlebar-actions" onPointerDown={(e) => e.stopPropagation()}>
+        <button className="win-btn" onClick={handleMin} title="Minimize">
+          <Minus size={14} />
+        </button>
         <button className="win-btn" onClick={handleMax} title="Maximize">
           {max ? <Maximize2 size={13} /> : <Square size={12} />}
         </button>
-        <button className="win-btn win-btn-close" onClick={handleClose} title="Close"><X size={14} /></button>
+        <button className="win-btn win-btn-close" onClick={handleClose} title="Close">
+          <X size={14} />
+        </button>
       </div>
     </div>
   );

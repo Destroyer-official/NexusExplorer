@@ -449,6 +449,16 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         homeDir: "D:\\code\\Main_projects\\NexusExplorer",
       } as unknown as T;
 
+    case "window_minimize":
+    case "window_close":
+      return undefined as unknown as T;
+
+    case "window_toggle_maximize":
+      return true as unknown as T;
+
+    case "window_is_maximized":
+      return false as unknown as T;
+
     case "list_bookmarks": {
       const stored = localStorage.getItem("nexus_bookmarks_browser");
       if (stored) {

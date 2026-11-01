@@ -26,3 +26,34 @@ pub async fn app_info(state: State<'_, AppState>) -> Result<AppInfo, String> {
         home_dir: home,
     })
 }
+
+/// Minimizes the current native window.
+#[tauri::command]
+pub async fn window_minimize(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+/// Toggles maximized / unmaximized state of the window.
+#[tauri::command]
+pub async fn window_toggle_maximize(window: tauri::Window) -> Result<bool, String> {
+    if window.is_maximized().map_err(|e| e.to_string())? {
+        window.unmaximize().map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
+/// Closes the native application window.
+#[tauri::command]
+pub async fn window_close(window: tauri::Window) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
+/// Returns whether the window is currently maximized.
+#[tauri::command]
+pub async fn window_is_maximized(window: tauri::Window) -> Result<bool, String> {
+    window.is_maximized().map_err(|e| e.to_string())
+}
+

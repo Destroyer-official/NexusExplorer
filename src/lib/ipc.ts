@@ -443,6 +443,10 @@ export const ipc = {
   undo: () => invokeSafe<UndoStatus>("undo"),
   redo: () => invokeSafe<UndoStatus>("redo"),
   appInfo: () => invokeSafe<AppInfo>("app_info"),
+  windowMinimize: () => invokeSafe<void>("window_minimize"),
+  windowToggleMaximize: () => invokeSafe<boolean>("window_toggle_maximize"),
+  windowClose: () => invokeSafe<void>("window_close"),
+  windowIsMaximized: () => invokeSafe<boolean>("window_is_maximized"),
 
   // ── misc ────────────────────────────────────────────────────────────────
   // ── power-user & forensic tools ───────────────────────────────────────────
