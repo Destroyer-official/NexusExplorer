@@ -19,11 +19,15 @@ import type {
   UsnJournalInfo,
   UsnRecordsBatch,
   VssSnapshot,
+  MerkleTreeReport,
+  MerkleProof,
+  MerkleDiffReport,
 } from "@/types";
 import { X } from "lucide-react";
 
 type TabId =
   | "duplicates"
+  | "merkle"
   | "content"
   | "images"
   | "ads"
@@ -39,6 +43,7 @@ type TabId =
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "duplicates", label: "Duplicates" },
+  { id: "merkle", label: "Merkle Tree Integrity" },
   { id: "content", label: "Content search" },
   { id: "images", label: "Image optimizer" },
   { id: "ads", label: "ADS streams" },
@@ -123,6 +128,7 @@ export default function PowerToolsDialog() {
           </div>
           <div style={{ flex: 1, minWidth: 0, overflow: "auto", padding: 18 }}>
             {tabId === "duplicates" && <DuplicatesPanel />}
+            {tabId === "merkle" && <MerklePanel />}
             {tabId === "content" && <ContentPanel />}
             {tabId === "images" && <ImagesPanel />}
             {tabId === "ads" && <AdsPanel />}
@@ -1211,6 +1217,246 @@ function PluginsPanel() {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function MerklePanel() {
+  const store = useAppStore();
+  const tab = store.tabs.find((t) => t.id === store.activeTabId);
+  const [targetDir, setTargetDir] = useState(tab?.path ?? "");
+  const [report, setReport] = useState<MerkleTreeReport | null>(null);
+  const [proof, setProof] = useState<MerkleProof | null>(null);
+  const [snapshotA, setSnapshotA] = useState<MerkleTreeReport | null>(null);
+  const [diffReport, setDiffReport] = useState<MerkleDiffReport | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searchFilter, setSearchFilter] = useState("");
+
+  useEffect(() => {
+    if (tab?.path && !targetDir) {
+      setTargetDir(tab.path);
+    }
+  }, [tab?.path, targetDir]);
+
+  const computeTree = async () => {
+    if (!targetDir.trim()) return;
+    setBusy(true);
+    setError(null);
+    setProof(null);
+    try {
+      const res = await ipc.toolsMerkleBuild(targetDir.trim());
+      setReport(res);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const getInclusionProof = async (relPath: string) => {
+    if (!targetDir.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await ipc.toolsMerkleProof(targetDir.trim(), relPath);
+      setProof(res);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const snapshotCurrent = () => {
+    if (!report) return;
+    setSnapshotA(report);
+    setDiffReport(null);
+  };
+
+  const runDiff = async () => {
+    if (!snapshotA || !report) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const diff = await ipc.toolsMerkleDiff(snapshotA, report);
+      setDiffReport(diff);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const filteredLeaves = useMemo(() => {
+    if (!report) return [];
+    if (!searchFilter.trim()) return report.leaves;
+    const q = searchFilter.toLowerCase();
+    return report.leaves.filter((l) => l.relativePath.toLowerCase().includes(q));
+  }, [report, searchFilter]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input
+          type="text"
+          className="input"
+          style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }}
+          value={targetDir}
+          placeholder="Target folder path..."
+          onChange={(e) => setTargetDir(e.target.value)}
+        />
+        <button className="btn btn-primary" disabled={busy || !targetDir.trim()} onClick={() => void computeTree()}>
+          {busy ? "Computing..." : "Compute Merkle Tree"}
+        </button>
+        {report && (
+          <button className="btn" disabled={busy} onClick={snapshotCurrent} title="Store current tree snapshot for differential audit">
+            {snapshotA ? "Update Snapshot A" : "Snapshot A"}
+          </button>
+        )}
+        {snapshotA && report && (
+          <button className="btn" disabled={busy} onClick={() => void runDiff()}>
+            Compare with Snapshot A
+          </button>
+        )}
+      </div>
+
+      <ErrorLine error={error} />
+
+      {report && (
+        <div style={{ display: "grid", gap: 14 }}>
+          {/* Header Summary Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--text-faint)" }}>TOTAL FILES</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{report.totalFiles.toLocaleString()}</div>
+            </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--text-faint)" }}>TOTAL PAYLOAD</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{formatBytes(report.totalBytes)}</div>
+            </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--text-faint)" }}>TREE DEPTH</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{report.treeDepth} levels</div>
+            </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--text-faint)" }}>COMPUTATION TIME</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{report.elapsedMs} ms</div>
+            </div>
+          </div>
+
+          {/* Root Hash Banner */}
+          <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--bg-card)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--accent)", letterSpacing: "0.06em" }}>
+                BLAKE3 MERKLE ROOT COMMITMENT HASH
+              </div>
+              <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "var(--success-bg)", color: "var(--success)", fontWeight: 600 }}>
+                AUTHENTIC
+              </span>
+            </div>
+            <code style={{ fontSize: 12, wordBreak: "break-all", color: "var(--text)" }}>{report.merkleRootHash}</code>
+          </div>
+
+          {/* Differential Audit Report if present */}
+          {diffReport && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: diffReport.isIdentical ? "var(--success-bg)" : "var(--card-bg)" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                {diffReport.isIdentical ? "Snapshot Comparison: Identical (Zero Drift)" : "Snapshot Comparison: Cryptographic Differences Detected"}
+              </div>
+              <div style={{ fontSize: 12, display: "flex", gap: 16 }}>
+                <span>Unmodified: <strong>{diffReport.unmodifiedCount}</strong></span>
+                <span style={{ color: "var(--accent)" }}>Modified: <strong>{diffReport.modifiedFiles.length}</strong></span>
+                <span style={{ color: "var(--success)" }}>Added: <strong>{diffReport.addedFiles.length}</strong></span>
+                <span style={{ color: "var(--danger)" }}>Removed: <strong>{diffReport.removedFiles.length}</strong></span>
+              </div>
+              {diffReport.modifiedFiles.length > 0 && (
+                <div style={{ marginTop: 8, fontSize: 11 }}>
+                  <strong>Modified files:</strong> {diffReport.modifiedFiles.join(", ")}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Inclusion Proof Card if generated */}
+          {proof && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--card-bg)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>
+                  Cryptographic Inclusion Proof (O(log N)): <code>{proof.targetRelativePath}</code>
+                </span>
+                <span
+                  style={{
+                    fontSize: 10,
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    fontWeight: 700,
+                    background: proof.isValid ? "var(--success-bg)" : "var(--danger-bg)",
+                    color: proof.isValid ? "var(--success)" : "var(--danger)",
+                  }}
+                >
+                  {proof.isValid ? "PROVABLY AUTHENTIC" : "PROOF INVALID"}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-faint)", display: "flex", gap: 16 }}>
+                <span>Leaf Index: #{proof.leafIndex + 1} of {proof.totalLeaves}</span>
+                <span>Audit Path Steps: {proof.auditPath.length} hashes</span>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 11, fontFamily: "monospace", wordBreak: "break-all" }}>
+                Leaf Hash: {proof.leafHash}
+              </div>
+            </div>
+          )}
+
+          {/* Leaves Explorer */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>Leaf Nodes ({report.leaves.length})</div>
+              <input
+                type="text"
+                className="input"
+                style={{ width: 220, fontSize: 11 }}
+                placeholder="Filter files..."
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+              />
+            </div>
+            <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6 }}>
+              <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse", textAlign: "left" }}>
+                <thead>
+                  <tr style={{ background: "var(--header-bg)", borderBottom: "1px solid var(--border)" }}>
+                    <th style={{ padding: "6px 10px" }}>Path</th>
+                    <th style={{ padding: "6px 10px" }}>Size</th>
+                    <th style={{ padding: "6px 10px" }}>BLAKE3 Leaf Hash</th>
+                    <th style={{ padding: "6px 10px" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLeaves.slice(0, 50).map((l) => (
+                    <tr key={l.relativePath} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "6px 10px", fontFamily: "monospace" }}>{l.relativePath}</td>
+                      <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}>{formatBytes(l.fileSize)}</td>
+                      <td style={{ padding: "6px 10px", fontFamily: "monospace", color: "var(--text-faint)" }}>
+                        {l.leafHash.substring(0, 16)}...
+                      </td>
+                      <td style={{ padding: "6px 10px" }}>
+                        <button
+                          className="btn btn-sm"
+                          style={{ fontSize: 10, padding: "2px 6px" }}
+                          disabled={busy}
+                          onClick={() => void getInclusionProof(l.relativePath)}
+                        >
+                          Verify Proof
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

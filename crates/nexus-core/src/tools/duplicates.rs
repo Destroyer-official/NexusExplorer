@@ -91,7 +91,7 @@ where
     let mut by_size: HashMap<u64, Vec<(PathBuf, u64)>> = HashMap::new();
     let mut scanned = 0u64;
 
-    let mut walker = jwalk::WalkDir::new(root).skip_hidden(false);
+    let mut walker = walkdir::WalkDir::new(root);
     if let Some(depth) = max_depth {
         if depth > 0 {
             walker = walker.max_depth(depth);
@@ -117,7 +117,7 @@ where
         by_size
             .entry(size)
             .or_default()
-            .push((entry.path(), system_time_to_epoch_ms(meta.modified())));
+            .push((entry.path().to_path_buf(), system_time_to_epoch_ms(meta.modified())));
         if scanned.is_multiple_of(512) {
             progress(scanned, scanned);
         }

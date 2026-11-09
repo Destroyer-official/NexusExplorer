@@ -25,6 +25,8 @@ export default function SearchResults() {
     timer.current = window.setTimeout(() => { void store.runSearch(q.trim()); }, 280);
   };
 
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
+
   const rows = search.results;
   const virtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => parentRef.current, estimateSize: () => 32, overscan: 12 });
 
@@ -38,11 +40,11 @@ export default function SearchResults() {
           value={query}
           onChange={(e) => trigger(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") void store.runSearch(); if (e.key === "Escape") store.closeSearch(); }}
-          placeholder={`Search in ${search.root || "current folder"}…`}
+          placeholder={`Search files (*.ext, doc?.txt, ext:pdf, regex:...) in ${search.root || "current folder"}…`}
         />
         {search.running && <span className="search-meta">Searching…</span>}
         {!search.running && search.results.length > 0 && <span className="search-meta">{search.total} results · {search.elapsedMs}ms</span>}
-        <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={store.closeSearch}><X size={14} /></button>
+        <button className="icon-btn" style={{ width: 28, height: 28 }} aria-label="Close search" onClick={store.closeSearch}><X size={14} /></button>
       </div>
       <div className="viewport" ref={parentRef} style={{ flex: 1 }}>
         {rows.length === 0 ? (

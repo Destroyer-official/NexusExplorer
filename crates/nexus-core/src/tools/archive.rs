@@ -124,10 +124,21 @@ pub fn find_7z_binary() -> Option<PathBuf> {
         candidates.push(Path::new(&pfx86).join("7-Zip").join("7z.exe"));
     }
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        candidates.push(Path::new(&local).join("Programs").join("7-Zip").join("7z.exe"));
+        candidates.push(
+            Path::new(&local)
+                .join("Programs")
+                .join("7-Zip")
+                .join("7z.exe"),
+        );
     }
     if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join("scoop").join("apps").join("7zip").join("current").join("7z.exe"));
+        candidates.push(
+            home.join("scoop")
+                .join("apps")
+                .join("7zip")
+                .join("current")
+                .join("7z.exe"),
+        );
         candidates.push(home.join("scoop").join("shims").join("7z.exe"));
     }
 
@@ -158,12 +169,43 @@ pub fn validate_destination_path(dest_dir: &Path, rel_path: &str) -> Result<Path
 
     // Reject drive letters like C: in member names
     if clean_rel.contains(':') {
-        return Err(format!("path traversal attempt with drive letter: {rel_path}"));
+        return Err(format!(
+            "path traversal attempt with drive letter: {rel_path}"
+        ));
     }
 
-    let joined = dest_dir.join(clean_rel);
+    // Lexical component inspection: prevent escaping dest_dir regardless of on-disk existence
+    let mut depth: isize = 0;
+    let mut normalized_subpath = PathBuf::new();
+    for component in Path::new(&clean_rel).components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                return Err(format!(
+                    "path traversal attempt with absolute or root component: {rel_path}"
+                ));
+            }
+            std::path::Component::CurDir => {
+                // Ignore '.'
+            }
+            std::path::Component::ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return Err(format!(
+                        "path traversal blocked escaping destination: {rel_path}"
+                    ));
+                }
+                normalized_subpath.pop();
+            }
+            std::path::Component::Normal(part) => {
+                depth += 1;
+                normalized_subpath.push(part);
+            }
+        }
+    }
 
-    // Normalize and check prefix
+    let joined = dest_dir.join(&normalized_subpath);
+
+    // Defense-in-depth: If dest_dir or ancestors exist, verify canonical prefix
     let dest_canon = dest_dir
         .canonicalize()
         .unwrap_or_else(|_| dest_dir.to_path_buf());
@@ -173,7 +215,9 @@ pub fn validate_destination_path(dest_dir: &Path, rel_path: &str) -> Result<Path
         if parent.exists() {
             if let Ok(parent_canon) = parent.canonicalize() {
                 if !parent_canon.starts_with(&dest_canon) {
-                    return Err(format!("path traversal blocked escaping destination: {rel_path}"));
+                    return Err(format!(
+                        "path traversal blocked escaping destination: {rel_path}"
+                    ));
                 }
             }
             break;
@@ -197,7 +241,9 @@ pub fn list_zip_archive(archive_path: &str) -> Result<ArchiveMetadata, String> {
     let mut total_compressed = 0u64;
 
     for i in 0..zip.len() {
-        let member = zip.by_index(i).map_err(|e| format!("read error at entry {i}: {e}"))?;
+        let member = zip
+            .by_index(i)
+            .map_err(|e| format!("read error at entry {i}: {e}"))?;
         let is_dir = member.is_dir();
         let uncompressed = member.size();
         let compressed = member.compressed_size();
@@ -239,18 +285,44 @@ pub fn list_zip_archive(archive_path: &str) -> Result<ArchiveMetadata, String> {
     })
 }
 
-/// Creates a ZIP archive containing the provided files and folders.
-pub fn create_zip_archive<F>(
+/// Sort-enhancement ordering inspired by RubikFS (USENIX FAST 2026).
+/// Groups files by extension/MIME family and file size before archiving to maximize
+/// cross-file dictionary matching and compression ratio.
+pub fn sort_entries_for_enhanced_compression(entries: &mut [(PathBuf, String)]) {
+    entries.sort_by(|(path_a, name_a), (path_b, name_b)| {
+        let is_dir_a = path_a.is_dir();
+        let is_dir_b = path_b.is_dir();
+        if is_dir_a != is_dir_b {
+            return is_dir_a.cmp(&is_dir_b).reverse(); // Directories first
+        }
+        let ext_a = path_a.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        let ext_b = path_b.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        if ext_a != ext_b {
+            return ext_a.cmp(&ext_b);
+        }
+        let size_a = path_a.metadata().map(|m| m.len()).unwrap_or(0);
+        let size_b = path_b.metadata().map(|m| m.len()).unwrap_or(0);
+        if size_a != size_b {
+            return size_a.cmp(&size_b);
+        }
+        name_a.cmp(name_b)
+    });
+}
+
+/// Internal helper for creating ZIP archives with optional RubikFS sort-enhanced ordering.
+fn create_zip_archive_internal<F>(
     sources: &[String],
     dest_zip_path: &str,
     compression_level: u8,
+    sort_enhanced: bool,
     mut progress_cb: F,
 ) -> Result<ArchiveOperationResult, String>
 where
     F: FnMut(usize, usize, u64),
 {
     let started = Instant::now();
-    let out_file = File::create(dest_zip_path).map_err(|e| format!("cannot create output zip: {e}"))?;
+    let out_file =
+        File::create(dest_zip_path).map_err(|e| format!("cannot create output zip: {e}"))?;
     let writer = BufWriter::new(out_file);
     let mut zip = ZipWriter::new(writer);
 
@@ -283,17 +355,24 @@ where
         if src_path.is_file() {
             files_to_add.push((src_path.to_path_buf(), root_name.to_string()));
         } else if src_path.is_dir() {
-            for e in jwalk::WalkDir::new(src_path).skip_hidden(false).into_iter().flatten() {
+            for e in walkdir::WalkDir::new(src_path).into_iter().flatten() {
                 let full = e.path();
                 if let Ok(rel) = full.strip_prefix(src_path) {
-                    let mut in_zip_name = Path::new(root_name).join(rel).to_string_lossy().replace('\\', "/");
+                    let mut in_zip_name = Path::new(root_name)
+                        .join(rel)
+                        .to_string_lossy()
+                        .replace('\\', "/");
                     if full.is_dir() && !in_zip_name.ends_with('/') {
                         in_zip_name.push('/');
                     }
-                    files_to_add.push((full, in_zip_name));
+                    files_to_add.push((full.to_path_buf(), in_zip_name));
                 }
             }
         }
+    }
+
+    if sort_enhanced {
+        sort_entries_for_enhanced_compression(&mut files_to_add);
     }
 
     let total_count = files_to_add.len();
@@ -311,7 +390,9 @@ where
 
             let mut buffer = [0u8; 65536];
             loop {
-                let n = f.read(&mut buffer).map_err(|e| format!("read error: {e}"))?;
+                let n = f
+                    .read(&mut buffer)
+                    .map_err(|e| format!("read error: {e}"))?;
                 if n == 0 {
                     break;
                 }
@@ -337,6 +418,32 @@ where
     })
 }
 
+/// Creates a standard ZIP archive containing the provided files and folders.
+pub fn create_zip_archive<F>(
+    sources: &[String],
+    dest_zip_path: &str,
+    compression_level: u8,
+    progress_cb: F,
+) -> Result<ArchiveOperationResult, String>
+where
+    F: FnMut(usize, usize, u64),
+{
+    create_zip_archive_internal(sources, dest_zip_path, compression_level, false, progress_cb)
+}
+
+/// Creates a sort-enhanced ZIP archive grouping related formats and extensions together (RubikFS USENIX FAST 2026).
+pub fn create_zip_archive_sort_enhanced<F>(
+    sources: &[String],
+    dest_zip_path: &str,
+    compression_level: u8,
+    progress_cb: F,
+) -> Result<ArchiveOperationResult, String>
+where
+    F: FnMut(usize, usize, u64),
+{
+    create_zip_archive_internal(sources, dest_zip_path, compression_level, true, progress_cb)
+}
+
 /// Extracts a ZIP archive safely into dest_dir (with anti-zip-bomb and path-traversal guards).
 pub fn extract_zip_archive<F>(
     archive_path: &str,
@@ -350,7 +457,8 @@ where
     let started = Instant::now();
     let dest_path = Path::new(dest_dir);
     if !dest_path.exists() {
-        fs::create_dir_all(dest_path).map_err(|e| format!("cannot create target directory: {e}"))?;
+        fs::create_dir_all(dest_path)
+            .map_err(|e| format!("cannot create target directory: {e}"))?;
     }
 
     let file = File::open(archive_path).map_err(|e| format!("cannot open archive: {e}"))?;
@@ -368,17 +476,21 @@ where
             }
         }
 
-        let mut member = zip.by_index(i).map_err(|e| format!("zip read member {i}: {e}"))?;
+        let mut member = zip
+            .by_index(i)
+            .map_err(|e| format!("zip read member {i}: {e}"))?;
         let raw_name = member.name().to_string();
 
         let out_target = validate_destination_path(dest_path, &raw_name)?;
 
         if member.is_dir() {
-            fs::create_dir_all(&out_target).map_err(|e| format!("create dir failed {}: {e}", out_target.display()))?;
+            fs::create_dir_all(&out_target)
+                .map_err(|e| format!("create dir failed {}: {e}", out_target.display()))?;
         } else {
             if let Some(parent) = out_target.parent() {
                 if !parent.exists() {
-                    fs::create_dir_all(parent).map_err(|e| format!("create parent dir failed: {e}"))?;
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("create parent dir failed: {e}"))?;
                 }
             }
 
@@ -392,7 +504,9 @@ where
                         return Err("extraction cancelled by user".into());
                     }
                 }
-                let n = member.read(&mut buffer).map_err(|e| format!("unzip stream error: {e}"))?;
+                let n = member
+                    .read(&mut buffer)
+                    .map_err(|e| format!("unzip stream error: {e}"))?;
                 if n == 0 {
                     break;
                 }
@@ -403,7 +517,9 @@ where
                         MAX_EXTRACT_BYTES / (1024 * 1024 * 1024)
                     ));
                 }
-                out_file.write_all(&buffer[..n]).map_err(|e| format!("file write error: {e}"))?;
+                out_file
+                    .write_all(&buffer[..n])
+                    .map_err(|e| format!("file write error: {e}"))?;
             }
             processed_files += 1;
         }
@@ -550,7 +666,10 @@ pub fn list_archive(archive_path: &str) -> Result<ArchiveMetadata, String> {
 }
 
 /// Extracts any supported archive into `dest_dir`.
-pub fn extract_archive(archive_path: &str, dest_dir: &str) -> Result<ArchiveOperationResult, String> {
+pub fn extract_archive(
+    archive_path: &str,
+    dest_dir: &str,
+) -> Result<ArchiveOperationResult, String> {
     let format = ArchiveFormat::from_path(Path::new(archive_path));
     if format == ArchiveFormat::Zip {
         return extract_zip_archive(archive_path, dest_dir, None, |_, _, _| {});
@@ -632,7 +751,9 @@ pub fn create_archive(
     for source in sources {
         command.arg(source);
     }
-    let output = command.output().map_err(|e| format!("7z create failed: {e}"))?;
+    let output = command
+        .output()
+        .map_err(|e| format!("7z create failed: {e}"))?;
     if !output.status.success() {
         return Err(format!(
             "7z archive creation failed: {}",
@@ -669,7 +790,8 @@ mod tests {
         let zip_file = dir.path().join("bundle.zip");
         let sources = vec![src_folder.to_string_lossy().to_string()];
 
-        let res = create_zip_archive(&sources, &zip_file.to_string_lossy(), 6, |_, _, _| {}).unwrap();
+        let res =
+            create_zip_archive(&sources, &zip_file.to_string_lossy(), 6, |_, _, _| {}).unwrap();
         assert!(res.success);
         assert!(zip_file.exists());
 
@@ -679,7 +801,13 @@ mod tests {
 
         // Extract archive
         let out_dir = dir.path().join("extracted");
-        let ext_res = extract_zip_archive(&zip_file.to_string_lossy(), &out_dir.to_string_lossy(), None, |_, _, _| {}).unwrap();
+        let ext_res = extract_zip_archive(
+            &zip_file.to_string_lossy(),
+            &out_dir.to_string_lossy(),
+            None,
+            |_, _, _| {},
+        )
+        .unwrap();
         assert!(ext_res.success);
 
         assert!(out_dir.join("my_source").join("hello.txt").exists());
@@ -697,10 +825,68 @@ mod tests {
 
         let malicious = "..\\..\\evil.exe";
         let res = validate_destination_path(&dest, malicious);
-        assert!(res.is_err(), "Must block parent directory escaping traversal");
+        assert!(
+            res.is_err(),
+            "Must block parent directory escaping traversal"
+        );
+
+        let nested_malicious = "foo/../../evil.exe";
+        let res_nested = validate_destination_path(&dest, nested_malicious);
+        assert!(
+            res_nested.is_err(),
+            "Must block nested parent directory escaping traversal"
+        );
+
+        let deep_nested = "foo/bar/../../../escaped.txt";
+        let res_deep = validate_destination_path(&dest, deep_nested);
+        assert!(
+            res_deep.is_err(),
+            "Must block deep nested escaping traversal"
+        );
 
         let drive_escape = "C:\\Windows\\System32\\cmd.exe";
         let res_drive = validate_destination_path(&dest, drive_escape);
         assert!(res_drive.is_err(), "Must block drive letter escape");
+
+        // Non-existent path traversal
+        let non_existent_escape = "ghost_folder/ghost_sub/../../../../escaped.dll";
+        let res_ghost = validate_destination_path(&dest, non_existent_escape);
+        assert!(
+            res_ghost.is_err(),
+            "Must block traversal through non-existent intermediate paths"
+        );
+
+        // Valid relative normalized path
+        let valid = "subfolder/nested/../document.pdf";
+        let res_valid = validate_destination_path(&dest, valid);
+        assert!(
+            res_valid.is_ok(),
+            "Must allow legitimate intra-directory relative paths"
+        );
+        assert_eq!(
+            res_valid.unwrap(),
+            dest.join("subfolder").join("document.pdf")
+        );
+    }
+
+    #[test]
+    fn test_zip_sort_enhanced_compression() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src_files");
+        fs::create_dir_all(&src).unwrap();
+
+        fs::write(src.join("b_code.rs"), b"pub fn func_b() { println!(\"code\"); }").unwrap();
+        fs::write(src.join("a_code.rs"), b"pub fn func_a() { println!(\"code\"); }").unwrap();
+        fs::write(src.join("z_data.json"), b"{\"val\": 100}").unwrap();
+
+        let zip_file = dir.path().join("sort_enhanced.zip");
+        let sources = vec![src.to_string_lossy().to_string()];
+
+        let res = create_zip_archive_sort_enhanced(&sources, &zip_file.to_string_lossy(), 6, |_, _, _| {}).unwrap();
+        assert!(res.success);
+        assert!(zip_file.exists());
+
+        let meta = list_zip_archive(&zip_file.to_string_lossy()).unwrap();
+        assert_eq!(meta.total_files, 3);
     }
 }

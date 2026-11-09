@@ -59,9 +59,10 @@ pub fn run() {
     if singleton_enabled {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
                 let _ = win.set_focus();
             }
-            emit_open_paths(app, extract_paths(&args));
+            emit_open_paths(app, extract_paths(args.get(1..).unwrap_or_default()));
         }));
     }
 
@@ -109,6 +110,7 @@ pub fn run() {
             commands::ops_cmds::pause_job,
             commands::ops_cmds::resume_job,
             commands::ops_cmds::cancel_job,
+            commands::ops_cmds::set_rate_limit,
             commands::ops_cmds::resolve_conflict,
             commands::ops_cmds::get_active_jobs,
             commands::ops_cmds::orphan_parts,
@@ -159,7 +161,11 @@ pub fn run() {
             commands::tools_cmds::tools_archive_find_7z,
             commands::tools_cmds::tools_par2_inspect,
             commands::tools_cmds::tools_clone_file,
+            commands::tools_cmds::tools_ioring_status,
             commands::tools_cmds::tools_shred_paths,
+            commands::tools_cmds::tools_generate_sanitization_cert,
+            commands::tools_cmds::tools_fastcdc_analyze,
+            commands::tools_cmds::tools_entropy_inspect,
             commands::tools_cmds::tools_git_status,
             commands::tools_cmds::tools_git_diff,
             commands::tools_cmds::tools_git_action,
@@ -181,6 +187,7 @@ pub fn run() {
             commands::tools_cmds::tools_summarize_document,
             commands::tools_cmds::tools_semantic_index,
             commands::tools_cmds::tools_semantic_search,
+            commands::tools_cmds::tools_semantic_hybrid_search,
             commands::tools_cmds::tools_copilot_plan,
             commands::tools_cmds::tools_copilot_execute,
             commands::tools_cmds::tools_copilot_feedback,
@@ -188,9 +195,11 @@ pub fn run() {
             commands::tools_cmds::tools_mesh_get_peers,
             commands::tools_cmds::tools_mesh_send_files,
             commands::tools_cmds::tools_usn_records,
+            commands::tools_cmds::tools_usn_search,
             commands::tools_cmds::tools_vss_list,
             commands::tools_cmds::tools_vss_restore,
             commands::tools_cmds::tools_devdrive_report,
+            commands::tools_cmds::tools_devdrive_migrate,
             commands::tools_cmds::tools_bitlocker_status,
             commands::tools_cmds::tools_bitlocker_unlock,
             commands::tools_cmds::tools_bitlocker_lock,
@@ -233,10 +242,34 @@ pub fn run() {
             commands::tools_cmds::tools_webdrop_status,
             commands::tools_cmds::tools_janitor_scan,
             commands::tools_cmds::tools_janitor_clean,
+            commands::tools_cmds::tools_janitor_scan_empty,
+            commands::tools_cmds::tools_janitor_clean_empty,
             commands::tools_cmds::tools_dlp_scan,
             commands::tools_cmds::tools_mounter_list,
             commands::tools_cmds::tools_mounter_mount,
             commands::tools_cmds::tools_mounter_unmount,
+            commands::tools_cmds::usb_list_devices,
+            commands::tools_cmds::usb_get_device,
+            commands::tools_cmds::usb_eject_device,
+            commands::tools_cmds::usb_get_locks,
+            commands::tools_cmds::usb_unlock_and_eject,
+            commands::tools_cmds::usb_benchmark,
+            commands::tools_cmds::usb_integrity_test,
+            commands::tools_cmds::usb_forensic_sanitize,
+            commands::tools_cmds::usb_surface_scan,
+            commands::tools_cmds::usb_get_multiboot,
+            commands::tools_cmds::usb_install_ventoy,
+            commands::tools_cmds::usb_add_multiboot_iso,
+            commands::tools_cmds::usb_get_topology,
+            commands::tools_cmds::usb_set_cache_policy,
+            commands::tools_cmds::usb_format,
+            commands::tools_cmds::usb_create_disk_image,
+            commands::tools_cmds::usb_burn_disk_image,
+            commands::tools_cmds::tools_merkle_build,
+            commands::tools_cmds::tools_merkle_proof,
+            commands::tools_cmds::tools_merkle_verify,
+            commands::tools_cmds::tools_merkle_diff,
+            commands::tools_cmds::tools_archive_create_sort_enhanced,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nexus Explorer");

@@ -1,10 +1,10 @@
 //! Enterprise Batch Multi-Rename Engine with regex, token templates, case transformations, and collision checks.
 
-use std::fs;
-use std::path::Path;
 use chrono::{Datelike, Local};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,7 +161,9 @@ pub fn generate_preview(
     case: CaseTransformation,
 ) -> Result<Vec<RenamePlanItem>, String> {
     let re = match find_regex {
-        Some(pat) if !pat.is_empty() => Some(Regex::new(pat).map_err(|e| format!("invalid find regex: {e}"))?),
+        Some(pat) if !pat.is_empty() => {
+            Some(Regex::new(pat).map_err(|e| format!("invalid find regex: {e}"))?)
+        }
         _ => None,
     };
 
@@ -170,10 +172,26 @@ pub fn generate_preview(
 
     for (idx, path_str) in paths.iter().enumerate() {
         let p = Path::new(path_str);
-        let orig_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
-        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-        let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_string();
-        let folder = p.parent().and_then(|parent| parent.file_name()).and_then(|s| s.to_str()).unwrap_or("");
+        let orig_name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let ext = p
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let folder = p
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
 
         let mut transformed_stem = stem.clone();
         if let Some(r) = &re {
@@ -181,10 +199,15 @@ pub fn generate_preview(
         }
 
         transformed_stem = apply_case(&transformed_stem, case);
+        let transformed_ext = match case {
+            CaseTransformation::Uppercase => ext.to_uppercase(),
+            CaseTransformation::Lowercase => ext.to_lowercase(),
+            _ => ext,
+        };
 
         let final_stem = if let Some(tmpl) = template {
             if !tmpl.trim().is_empty() {
-                interpolate_tokens(tmpl, idx + 1, &transformed_stem, &ext, folder)
+                interpolate_tokens(tmpl, idx + 1, &transformed_stem, &transformed_ext, folder)
             } else {
                 transformed_stem
             }
@@ -192,10 +215,10 @@ pub fn generate_preview(
             transformed_stem
         };
 
-        let new_name = if ext.is_empty() || final_stem.ends_with(&format!(".{ext}")) {
+        let new_name = if transformed_ext.is_empty() || final_stem.ends_with(&format!(".{transformed_ext}")) {
             final_stem
         } else {
-            format!("{final_stem}.{ext}")
+            format!("{final_stem}.{transformed_ext}")
         };
 
         let parent_dir = p.parent().unwrap_or_else(|| Path::new("."));
@@ -206,14 +229,17 @@ pub fn generate_preview(
         let mut error = String::new();
 
         if is_changed {
-            if destination_names.contains(&new_path) {
+            let key = new_path.to_lowercase();
+            let is_case_only = new_path.eq_ignore_ascii_case(path_str);
+
+            if destination_names.contains(&key) {
                 is_valid = false;
                 error = "duplicate destination collision in batch".into();
-            } else if Path::new(&new_path).exists() {
+            } else if !is_case_only && Path::new(&new_path).exists() {
                 is_valid = false;
                 error = "destination file already exists on disk".into();
             }
-            destination_names.insert(new_path.clone());
+            destination_names.insert(key);
         }
 
         items.push(RenamePlanItem {
@@ -233,17 +259,36 @@ pub fn generate_preview(
 pub fn execute_rename_batch(plan: &[RenamePlanItem]) -> Result<RenameTransaction, String> {
     for item in plan {
         if !item.is_valid {
-            return Err(format!("cannot execute: invalid item '{}': {}", item.original_name, item.error_message));
+            return Err(format!(
+                "cannot execute: invalid item '{}': {}",
+                item.original_name, item.error_message
+            ));
         }
     }
 
-    let mut executed = Vec::new();
+    let mut executed: Vec<(String, String)> = Vec::new();
     for item in plan {
         if item.is_changed {
-            if let Err(e) = fs::rename(&item.original_path, &item.new_path) {
+            let is_case_only = item.new_path.eq_ignore_ascii_case(&item.original_path);
+            let rename_res = if is_case_only {
+                // Two-step rename for Windows case-preserving filesystem safety
+                let temp_path = format!("{}.nexus_case_tmp", item.original_path);
+                fs::rename(&item.original_path, &temp_path)
+                    .and_then(|_| fs::rename(&temp_path, &item.new_path))
+            } else {
+                fs::rename(&item.original_path, &item.new_path)
+            };
+
+            if let Err(e) = rename_res {
                 // Rollback already executed items
                 for (old_p, new_p) in executed.iter().rev() {
-                    let _ = fs::rename(new_p, old_p);
+                    let is_case_only_rb = old_p.eq_ignore_ascii_case(new_p);
+                    if is_case_only_rb {
+                        let temp_p = format!("{old_p}.nexus_case_tmp");
+                        let _ = fs::rename(new_p, &temp_p).and_then(|_| fs::rename(&temp_p, old_p));
+                    } else {
+                        let _ = fs::rename(new_p, old_p);
+                    }
                 }
                 return Err(format!("rename failed for {}: {e}", item.original_name));
             }
@@ -264,7 +309,14 @@ pub fn rollback_transaction(tx: &RenameTransaction) -> Result<usize, String> {
     let mut rolled_back = 0;
     for (old_p, new_p) in tx.items.iter().rev() {
         if Path::new(new_p).exists() {
-            fs::rename(new_p, old_p).map_err(|e| format!("rollback error from {new_p} to {old_p}: {e}"))?;
+            let is_case_only = old_p.eq_ignore_ascii_case(new_p);
+            let res = if is_case_only {
+                let temp_path = format!("{old_p}.nexus_case_tmp");
+                fs::rename(new_p, &temp_path).and_then(|_| fs::rename(&temp_path, old_p))
+            } else {
+                fs::rename(new_p, old_p)
+            };
+            res.map_err(|e| format!("rollback error from {new_p} to {old_p}: {e}"))?;
             rolled_back += 1;
         }
     }
@@ -276,6 +328,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_case_only_rename_on_windows_ntfs() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lowercase_name.txt");
+        fs::write(&file, b"content").unwrap();
+
+        let paths = vec![file.to_str().unwrap().to_string()];
+        // Rename to uppercase
+        let plan = generate_preview(&paths, None, "", None, CaseTransformation::Uppercase).unwrap();
+
+        assert_eq!(plan[0].new_name, "LOWERCASE_NAME.TXT");
+        assert!(
+            plan[0].is_valid,
+            "Case-only rename must be valid on case-insensitive filesystems"
+        );
+        assert!(plan[0].is_changed);
+
+        let tx = execute_rename_batch(&plan).unwrap();
+        assert_eq!(tx.items.len(), 1);
+
+        // Verify the file was renamed
+        let upper_path = dir.path().join("LOWERCASE_NAME.TXT");
+        assert!(upper_path.exists());
+
+        // Roll back
+        let undone = rollback_transaction(&tx).unwrap();
+        assert_eq!(undone, 1);
+        assert!(file.exists());
+    }
+
+    #[test]
     fn test_token_and_case_rename() {
         let dir = tempfile::tempdir().unwrap();
         let f1 = dir.path().join("photo_vacation.jpg");
@@ -283,14 +365,18 @@ mod tests {
         fs::write(&f1, b"x").unwrap();
         fs::write(&f2, b"y").unwrap();
 
-        let paths = vec![f1.to_str().unwrap().to_string(), f2.to_str().unwrap().to_string()];
+        let paths = vec![
+            f1.to_str().unwrap().to_string(),
+            f2.to_str().unwrap().to_string(),
+        ];
         let plan = generate_preview(
             &paths,
             Some("photo_"),
             "",
             Some("Trip_<counter:001>_{name}"),
             CaseTransformation::TitleCase,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(plan[0].new_name, "Trip_001_Vacation.jpg");
         assert_eq!(plan[1].new_name, "Trip_002_Beach.jpg");

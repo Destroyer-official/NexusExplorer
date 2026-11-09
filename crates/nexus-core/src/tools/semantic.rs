@@ -113,10 +113,9 @@ pub fn build_semantic_index(root_dir: &Path, max_files: usize) -> Result<Semanti
     }
 
     let mut documents = Vec::new();
-    let walker = jwalk::WalkDir::new(root_dir)
-        .skip_hidden(false)
-        .follow_links(false)
-        .max_depth(8);
+    let walker = walkdir::WalkDir::new(root_dir)
+        .max_depth(8)
+        .follow_links(false);
 
     let supported_exts: HashSet<&str> = [
         "txt", "md", "markdown", "rs", "ts", "tsx", "js", "jsx", "py", "json", "toml",
@@ -135,11 +134,11 @@ pub fn build_semantic_index(root_dir: &Path, max_files: usize) -> Result<Semanti
             Err(_) => continue,
         };
 
-        if !entry.file_type.is_file() {
+        if !entry.file_type().is_file() {
             continue;
         }
 
-        let path = entry.path();
+        let path = entry.path().to_path_buf();
         let ext = path
             .extension()
             .and_then(|s| s.to_str())
@@ -299,6 +298,163 @@ pub fn search_semantic(
     Ok(matches)
 }
 
+/// Hybrid BM25 Lexical + Dense Semantic Vector Search with Reciprocal Rank Fusion (RRF).
+/// Combines exact keyword recall from BM25 with conceptual semantic comprehension from dense 256-dim vectors.
+pub fn search_semantic_hybrid(
+    root_dir: &Path,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<SemanticMatch>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let index_file = root_dir.join(".nexus").join("semantic_index.json");
+    let index = if index_file.exists() {
+        if let Ok(content) = fs::read_to_string(&index_file) {
+            serde_json::from_str::<SemanticIndex>(&content)
+                .unwrap_or_else(|_| build_semantic_index(root_dir, 500).unwrap_or_default())
+        } else {
+            build_semantic_index(root_dir, 500)?
+        }
+    } else {
+        build_semantic_index(root_dir, 500)?
+    };
+
+    if index.documents.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let query_vector = generate_semantic_vector(query);
+    let query_words: Vec<String> = query
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    // 1. Calculate document frequencies for BM25
+    let mut doc_freqs: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut doc_word_counts: Vec<usize> = Vec::with_capacity(index.documents.len());
+    let mut total_words = 0usize;
+
+    for doc in &index.documents {
+        let snippet_lower = doc.snippet.to_lowercase();
+        let name_lower = doc.file_name.to_lowercase();
+        let combined = format!("{name_lower} {snippet_lower}");
+        let tokens: HashSet<String> = combined
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+            .filter(|w| !w.is_empty())
+            .collect();
+
+        for term in &query_words {
+            if tokens.contains(term) {
+                *doc_freqs.entry(term.clone()).or_insert(0) += 1;
+            }
+        }
+
+        let words_count = tokens.len().max(1);
+        total_words += words_count;
+        doc_word_counts.push(words_count);
+    }
+
+    let avgdl = (total_words as f32) / (index.documents.len() as f32).max(1.0);
+    let n_docs = index.documents.len() as f32;
+    let k1: f32 = 1.2;
+    let b: f32 = 0.75;
+
+    // 2. Compute BM25 scores and Dense Cosine scores for each document
+    let mut bm25_scores: Vec<(usize, f32)> = Vec::with_capacity(index.documents.len());
+    let mut dense_scores: Vec<(usize, f32)> = Vec::with_capacity(index.documents.len());
+
+    for (idx, doc) in index.documents.iter().enumerate() {
+        let snippet_lower = doc.snippet.to_lowercase();
+        let name_lower = doc.file_name.to_lowercase();
+        let combined = format!("{name_lower} {snippet_lower}");
+        let tokens: Vec<String> = combined
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+            .collect();
+
+        let mut bm25 = 0.0f32;
+        let dl = doc_word_counts[idx] as f32;
+
+        for term in &query_words {
+            let df = *doc_freqs.get(term).unwrap_or(&0) as f32;
+            let idf = ((n_docs - df + 0.5) / (df + 0.5) + 1.0).ln().max(0.0);
+            let tf = tokens.iter().filter(|&t| t == term).count() as f32;
+            if tf > 0.0 {
+                let num = tf * (k1 + 1.0);
+                let den = tf + k1 * (1.0 - b + b * (dl / avgdl));
+                bm25 += idf * (num / den);
+            }
+        }
+
+        // Filename match boost
+        for term in &query_words {
+            if name_lower.contains(term) {
+                bm25 += 1.5;
+            }
+        }
+
+        bm25_scores.push((idx, bm25));
+
+        // Dense Semantic Cosine Similarity
+        let cos_sim = cosine_similarity(&query_vector, &doc.vector);
+        dense_scores.push((idx, cos_sim));
+    }
+
+    // 3. Rank both sets descending
+    bm25_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    dense_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut bm25_ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (rank, (idx, _)) in bm25_scores.iter().enumerate() {
+        bm25_ranks.insert(*idx, rank);
+    }
+
+    let mut dense_ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (rank, (idx, _)) in dense_scores.iter().enumerate() {
+        dense_ranks.insert(*idx, rank);
+    }
+
+    // 4. Reciprocal Rank Fusion (k = 60)
+    let rrf_k = 60.0f32;
+    let mut fused_matches: Vec<SemanticMatch> = Vec::new();
+
+    for (idx, doc) in index.documents.iter().enumerate() {
+        let r_bm25 = *bm25_ranks.get(&idx).unwrap_or(&usize::MAX) as f32;
+        let r_dense = *dense_ranks.get(&idx).unwrap_or(&usize::MAX) as f32;
+
+        let rrf_score = (1.0 / (rrf_k + r_bm25)) + (1.0 / (rrf_k + r_dense));
+        let normalized_score = ((rrf_score / (2.0 / rrf_k)) * 100.0).round() / 100.0;
+
+        let doc_name_lower = doc.file_name.to_lowercase();
+        let matched_terms: Vec<String> = query_words
+            .iter()
+            .filter(|q| doc.snippet.to_lowercase().contains(q.as_str()) || doc_name_lower.contains(q.as_str()))
+            .cloned()
+            .collect();
+
+        if normalized_score > 0.10 || !matched_terms.is_empty() {
+            fused_matches.push(SemanticMatch {
+                file_path: doc.file_path.clone(),
+                rel_path: doc.rel_path.clone(),
+                file_name: doc.file_name.clone(),
+                file_size: doc.file_size,
+                score: normalized_score,
+                snippet: doc.snippet.clone(),
+                matched_terms,
+            });
+        }
+    }
+
+    fused_matches.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    fused_matches.truncate(limit.max(1));
+
+    Ok(fused_matches)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +491,39 @@ mod tests {
         let results = search_semantic(temp.path(), "user database table schema", 5).unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0].file_name, "database_migration.sql");
+    }
+
+    #[test]
+    fn test_hybrid_bm25_semantic_search() {
+        let temp = tempfile::tempdir().unwrap();
+        let path1 = temp.path().join("auth_service.rs");
+        let path2 = temp.path().join("docker-compose.yml");
+        let path3 = temp.path().join("readme.md");
+
+        fs::write(
+            &path1,
+            "pub fn authenticate_bearer_token(jwt: &str) -> Result<Claims, AuthError> {\n    // Validate cryptographic signature\n}",
+        )
+        .unwrap();
+        fs::write(
+            &path2,
+            "version: '3.8'\nservices:\n  redis:\n    image: redis:7-alpine\n    ports:\n      - '6379:6379'\n",
+        )
+        .unwrap();
+        fs::write(
+            &path3,
+            "# System Documentation\nThis repository provides secure authentication and container deployment orchestrations.\n",
+        )
+        .unwrap();
+
+        let index = build_semantic_index(temp.path(), 50).unwrap();
+        assert_eq!(index.total_documents, 3);
+
+        // Exact term + semantic concept query
+        let results = search_semantic_hybrid(temp.path(), "authenticate bearer token jwt signature", 5).unwrap();
+        assert!(!results.is_empty());
+        assert_eq!(results[0].file_name, "auth_service.rs");
+        assert!(results[0].score > 0.50);
+        assert!(results[0].matched_terms.contains(&"authenticate".to_string()));
     }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/state/store";
 import { ipc } from "@/lib/ipc";
+import { THEME_PRESETS } from "@/lib/theme";
 import { Search } from "lucide-react";
 
 interface Item { group: string; label: string; hint?: string; action: () => void; }
@@ -18,7 +19,7 @@ export default function CommandPalette() {
     const out: Item[] = [];
     const push = (group: string, label: string, action: () => void, hint?: string) => out.push({ group, label, action, hint });
     // Commands
-    push("Commands", "New tab", () => { const home = store.knownFolders.find((f) => f.id === "home")?.path ?? "C:\\"; void store.openTab(home, true); });
+    push("Commands", "New tab", () => { const home = store.knownFolders.find((f) => f.id === "home")?.path ?? "C:\\"; void store.openTab(home, true, false); });
     push("Commands", "New folder", () => void store.createFolder());
     push("Commands", "New file", () => void store.createFile());
     push("Commands", "Refresh", () => void store.refreshActive());
@@ -33,6 +34,30 @@ export default function CommandPalette() {
     push("Commands", "Sort by date modified", () => store.setSort("modified"));
     push("Commands", "Sort by size", () => store.setSort("size"));
     push("Commands", "Select all", () => store.selectAll(), "Ctrl+A");
+    push("Commands", "Invert selection", () => store.invertSelection(), "Ctrl+Shift+I");
+    push("Commands", "Select by pattern...", () => store.setSelectPatternOpen(true), "Ctrl+Shift+S");
+    push("Commands", "Compare dual panes", () => void store.comparePanes(), "Ctrl+Shift+E");
+    push("Commands", "Toggle synchronized dual-pane navigation", () => store.toggleSyncNav(), "Ctrl+Shift+D");
+    push("Commands", "Toggle flat branch view", () => void store.toggleFlatView(), "Ctrl+Shift+F");
+    push("Commands", "Focus address bar / Go to path", () => window.dispatchEvent(new CustomEvent("nexus:focus-address")), "Ctrl+L");
+    push("Commands", "Go to folder / location...", () => store.setGoToFolderOpen(true), "Ctrl+G");
+    push("Commands", "Search & switch open tabs", () => store.setTabSearchOpen(true), "Ctrl+Shift+A");
+    push("Commands", "Compress with options (ZIP, 7z, TAR)...", () => {
+      const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+      const paths = activeTab?.selected.length ? activeTab.selected : (activeTab ? [activeTab.path] : []);
+      if (paths.length > 0) store.setCreateArchivePaths(paths);
+      else store.pushToast("warning", "No Selection", "Select items to compress first.");
+    });
+    push("Commands", "Calculate all folder sizes in current tab", () => {
+      const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+      const dirPaths = activeTab?.entries.filter((e) => e.isDir).map((e) => e.path) ?? [];
+      if (dirPaths.length > 0) {
+        store.autoCalculateFolderSizes(dirPaths);
+        store.pushToast("info", "Calculating Folder Sizes", `Sizing ${dirPaths.length} folders in background...`);
+      } else {
+        store.pushToast("info", "Folder Sizes", "No subdirectories in this tab.");
+      }
+    });
     push("Commands", "Undo", () => void store.undo(), "Ctrl+Z");
     push("Commands", "Redo", () => void store.redo(), "Ctrl+Y");
     push("Commands", "Go up", () => void store.goUp(), "Alt+Up");
@@ -40,7 +65,7 @@ export default function CommandPalette() {
     push("Commands", "Go forward", () => void store.goForward(), "Alt+Right");
     push("Commands", "Close tab", () => { if (store.activeTabId) void store.closeTab(store.activeTabId); }, "Ctrl+W");
     push("Commands", "Batch rename selected...", () => store.setBatchRenameOpen(true), "Ctrl+Shift+R");
-    push("Commands", "AI File Copilot (Natural Language Assistant)", () => store.openCopilot(), "Ctrl+K");
+    push("Commands", "Nexus AI Agent (Autonomous Natural Language Assistant)", () => store.openCopilot(), "Ctrl+K");
     push("Commands", "VDFS & Content-Addressed Storage Dashboard", () => store.setVdfsOpen(true));
     push("Commands", "Mobile QR AirDrop / Direct WebDrop Portal", () => store.setWebdropOpen(true));
     push("Commands", "Developer Cache & Build Artifact Janitor", () => store.setJanitorOpen(true));
@@ -55,6 +80,14 @@ export default function CommandPalette() {
       const selected = activeTab?.selected[0] ?? activeTab?.entries.find((e) => !e.isDir)?.path;
       if (selected) store.setHexEditorPath(selected);
       else store.pushToast("info", "Hex Editor", "Select a file to inspect its raw bytes.");
+    });
+    push("Commands", "Compare Files (Binary Diff / Differ)...", () => {
+      const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+      if (activeTab && activeTab.selected.length === 2) {
+        store.openCompareModal(activeTab.selected[0], activeTab.selected[1]);
+      } else {
+        store.pushToast("info", "Compare Files", "Select exactly two files to compare side-by-side.");
+      }
     });
     push("Commands", "Inspect Properties (Forensic Timestamps, Hashes, ADS, Locks)", () => {
       const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
@@ -88,6 +121,44 @@ export default function CommandPalette() {
     push("Commands", "Settings", () => store.setSettingsOpen(true));
     push("Commands", "Keyboard shortcuts", () => store.setShortcutsOpen(true));
     push("Commands", "Command palette", () => store.togglePalette());
+    // Themes & Visual Polish
+    push("Themes", "Toggle Dark / Light Theme", () => {
+      const current = store.settings.theme;
+      const next = current === "light" ? "dark" : "light";
+      void store.updateSettings({ theme: next });
+      store.pushToast("info", "Theme Changed", `Switched to ${next === "light" ? "Light" : "Dark"} mode`);
+    }, "Ctrl+Alt+T");
+    push("Themes", "Open Theme & Visual Polish Studio…", () => store.setSettingsOpen(true));
+    THEME_PRESETS.forEach((preset) => {
+      push("Themes", `Apply Theme: ${preset.name}`, () => {
+        void store.updateSettings({
+          theme: preset.id,
+          activeCustomTheme: null,
+          accent: preset.defaultAccent,
+          customAccentColor: preset.defaultAccent,
+          glassBlur: preset.glassBlur,
+          glassOpacity: preset.glassOpacity,
+          borderRadius: preset.borderRadius ?? 10,
+          fontFamily: preset.fontFamily ?? "Segoe UI Variable, system-ui, sans-serif",
+        });
+        store.pushToast("success", "Theme Applied", preset.name);
+      });
+    });
+    (store.settings.customThemes ?? []).forEach((ct) => {
+      push("Themes", `Apply Custom Theme: ${ct.name}`, () => {
+        void store.updateSettings({
+          theme: ct.id,
+          activeCustomTheme: ct,
+          accent: ct.accent,
+          customAccentColor: ct.accent,
+          glassBlur: ct.glassBlur,
+          glassOpacity: ct.glassOpacity,
+          borderRadius: ct.borderRadius ?? 10,
+          fontFamily: ct.fontFamily ?? "Segoe UI Variable, system-ui, sans-serif",
+        });
+        store.pushToast("success", "Custom Theme Applied", ct.name);
+      });
+    });
     // Places
     store.knownFolders.forEach((f) => push("Places", f.label, () => void store.navigateTo(f.path), f.path));
     store.drives.forEach((d) => push("Places", d.label || d.path, () => void store.navigateTo(d.path), d.path));
@@ -102,7 +173,7 @@ export default function CommandPalette() {
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
     if (!q) return items.slice(0, 60);
-    return items.filter((i) => i.label.toLowerCase().includes(q) || (i.hint ?? "").toLowerCase().includes(q)).slice(0, 80);
+    return items.filter((i) => i.label.toLowerCase().includes(q) || (i.hint ?? "").toLowerCase().includes(q) || i.group.toLowerCase().includes(q)).slice(0, 80);
   }, [items, query]);
 
   useEffect(() => { setActive(0); }, [query]);

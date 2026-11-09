@@ -23,3 +23,12 @@ chrome_browser_screenshot.png
 current_state.png
 readme_quicklook.png
 screenshot.png
+audit_*.png
+browser_test_*.png
+browser_ui_test_*.png
+drag_ghost_in_action.png
+step*.png
+ui_*.png
+ui_audit_current_view.png
+.ui-audit/
+artifacts/

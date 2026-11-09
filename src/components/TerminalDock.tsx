@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/state/store";
 import { ipc, toErrorMessage } from "@/lib/ipc";
-import { ChevronDown, ChevronUp, SquareTerminal, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, FolderSync, LocateFixed, SquareTerminal, Trash2, X } from "lucide-react";
 
 export default function TerminalDock() {
   const store = useAppStore();
@@ -9,6 +9,7 @@ export default function TerminalDock() {
   const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [shell, setShell] = useState<"powershell" | "cmd">("powershell");
+  const [autoSyncDir, setAutoSyncDir] = useState(true);
   const [output, setOutput] = useState("");
   const [input, setInput] = useState("");
   const [closed, setClosed] = useState(false);
@@ -42,6 +43,28 @@ export default function TerminalDock() {
       setError(toErrorMessage(err));
     }
   };
+
+  const cdTo = async (targetPath: string) => {
+    if (!sessionId || closed || !targetPath) return;
+    startedCwd.current = targetPath;
+    const cmd =
+      shell === "powershell"
+        ? `Set-Location -LiteralPath '${targetPath.replace(/'/g, "''")}'\r\n`
+        : `cd /d "${targetPath}"\r\n`;
+    try {
+      await ipc.toolsTerminalWrite(sessionId, cmd);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    }
+  };
+
+  // Follow active explorer directory when auto-sync is enabled
+  useEffect(() => {
+    if (!open || !autoSyncDir || !sessionId || closed || !activeTab?.path) return;
+    if (activeTab.path !== startedCwd.current) {
+      void cdTo(activeTab.path);
+    }
+  }, [activeTab?.path, open, autoSyncDir, sessionId, closed]);
 
   // Start a session only while the dock is visible and has no live one.
   useEffect(() => {
@@ -89,6 +112,14 @@ export default function TerminalDock() {
     return () => window.clearTimeout(timer);
   }, [open, collapsed]);
 
+  useEffect(() => {
+    if (open && store.terminalDraft !== null) {
+      setInput(store.terminalDraft);
+      useAppStore.setState({ terminalDraft: null });
+      setCollapsed(false);
+    }
+  }, [open, store.terminalDraft]);
+
   if (!open) return null;
 
   const send = async () => {
@@ -124,6 +155,22 @@ export default function TerminalDock() {
           <option value="powershell">PowerShell</option>
           <option value="cmd">cmd.exe</option>
         </select>
+        <button
+          className={`icon-btn ${autoSyncDir ? "active" : ""}`}
+          title={autoSyncDir ? "Disable auto directory sync" : "Enable auto directory sync (Follow Explorer folder changes)"}
+          onClick={() => setAutoSyncDir(!autoSyncDir)}
+          style={autoSyncDir ? { color: "var(--accent)" } : undefined}
+        >
+          <FolderSync size={13} />
+        </button>
+        <button
+          className="icon-btn"
+          title={`Change directory to ${activeTab?.path ?? "current folder"}`}
+          disabled={closed || !sessionId || !activeTab?.path}
+          onClick={() => activeTab?.path && void cdTo(activeTab.path)}
+        >
+          <LocateFixed size={13} />
+        </button>
         <button className="icon-btn" title="Restart session" onClick={() => void start(shell, activeTab?.path ?? "C:\\")}>
           <SquareTerminal size={13} />
         </button>

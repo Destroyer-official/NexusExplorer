@@ -17,11 +17,161 @@ export interface FileEntry {
 export interface DriveInfo {
   path: string;
   label: string;
-  driveType: "removable" | "fixed" | "network" | "cdrom" | "ramdisk" | "unknown" | string;
+  driveType: "removable" | "fixed" | "portable" | "network" | "cdrom" | "ramdisk" | "unknown" | string;
   filesystem: string;
   freeBytes: number;
   totalBytes: number;
   isReady: boolean;
+  isUsb?: boolean;
+  usbSpeed?: string;
+  isDegradedPort?: boolean;
+}
+
+export interface UsbDeviceDetails {
+  path: string;
+  label: string;
+  driveLetter: string;
+  vendor: string;
+  model: string;
+  serialNumber: string;
+  vid: string;
+  pid: string;
+  usbProtocol: "UASP (USB Attached SCSI)" | "BOT (Bulk-Only Transport)" | "USB Mass Storage";
+  usbSpeed: "USB 3.2 Gen 2 (10 Gbps)" | "USB 3.2 Gen 1 (5 Gbps)" | "USB 2.0 HighSpeed (480 Mbps)" | "USB 4 / Thunderbolt (40 Gbps)" | string;
+  isDegradedPort: boolean;
+  writeCachePolicy: "quick_removal" | "better_performance";
+  filesystem: string;
+  clusterSizeBytes: number;
+  freeBytes: number;
+  totalBytes: number;
+  usedBytes: number;
+  isRemovable: boolean;
+  smartHealthScore: number;
+  temperatureC: number;
+  smartStatus: "healthy" | "warning" | "critical";
+  partitionScheme: "GPT" | "MBR";
+  partitionsCount: number;
+  sustainedWriteMBps: number;
+  readMBps: number;
+  isLocked: boolean;
+  lockingProcessesCount: number;
+}
+
+export interface UsbLockingProcess {
+  pid: number;
+  name: string;
+  windowTitle?: string;
+  lockedPath: string;
+  appType: string;
+  isSystem: boolean;
+}
+
+export interface UsbSpeedBenchmarkResult {
+  seqReadMBps: number;
+  seqWriteMBps: number;
+  sustainedWriteMBps: number;
+  rand4kReadIOPS: number;
+  rand4kWriteIOPS: number;
+  elapsedMs: number;
+  bufferBurstDropRatio: number;
+}
+
+export interface UsbIntegrityResult {
+  passed: boolean;
+  claimedCapacityBytes: number;
+  verifiedCapacityBytes: number;
+  corruptedBytes: number;
+  isCounterfeit: boolean;
+  suspectedRealCapacityBytes: number;
+  elapsedMs: number;
+  speedMBps: number;
+  statusMessage: string;
+}
+
+export interface UsbFormatOptions {
+  filesystem: "exFAT" | "FAT32" | "NTFS" | "ReFS" | string;
+  label: string;
+  clusterSize: number;
+  quickFormat: boolean;
+}
+
+export interface UsbDiskImageOptions {
+  sourceDrive: string;
+  targetImagePath: string;
+  format: "raw_img" | "iso";
+  compress: boolean;
+}
+
+export interface UsbSurfaceScanBlock {
+  id: number;
+  status: "fast" | "good" | "normal" | "slow" | "critical" | "bad";
+  latencyMs: number;
+  lba: number;
+}
+
+export interface UsbSurfaceScanReport {
+  totalBlocks: number;
+  scannedBlocks: number;
+  fastCount: number;
+  goodCount: number;
+  normalCount: number;
+  slowCount: number;
+  criticalCount: number;
+  badCount: number;
+  blocks: UsbSurfaceScanBlock[];
+  isScanning: boolean;
+  elapsedMs: number;
+  avgLatencyMs: number;
+  maxLatencyMs: number;
+}
+
+export interface UsbMultiBootIso {
+  id: string;
+  name: string;
+  osFamily: "windows" | "linux" | "utility" | "bsd";
+  fileName: string;
+  sizeBytes: number;
+  uefiCompatible: boolean;
+  secureBootSigned: boolean;
+  hasPersistence: boolean;
+  persistenceSizeMB?: number;
+  isActive: boolean;
+}
+
+export interface UsbMultiBootConfig {
+  isVentoyInstalled: boolean;
+  bootloaderVersion: string;
+  partitionScheme: "GPT" | "MBR";
+  secureBootEnabled: boolean;
+  isos: UsbMultiBootIso[];
+}
+
+export interface UsbBusTopology {
+  controllerName: string;
+  controllerType: "xHCI (USB 3.2)" | "EHCI (USB 2.0)" | "Thunderbolt 4 / USB4" | string;
+  rootHubPort: number;
+  negotiatedSpeed: string;
+  busPowerMa: number;
+  usbPdSupported: boolean;
+  usbPdVoltageV: number;
+  usbPdCurrentA: number;
+  endpoints: {
+    ep: number;
+    direction: "IN" | "OUT";
+    type: "Control" | "Bulk" | "Interrupt" | "Isochronous";
+    maxPacketSize: number;
+  }[];
+}
+
+export interface UsbSanitizeReport {
+  standard: "nist_800_88_purge" | "nist_800_88_clear" | "dod_5220_22_m" | "gutmann_35";
+  passesCompleted: number;
+  totalPasses: number;
+  bytesSanitized: number;
+  verificationPassed: boolean;
+  cryptoHashSha256: string;
+  certificateId: string;
+  completedAt: string;
 }
 
 export interface KnownFolder {
@@ -44,6 +194,23 @@ export interface RecentEntry {
   visitedMs: number;
 }
 
+export interface CustomThemeDefinition {
+  id: string;
+  name: string;
+  isDark: boolean;
+  bg: string;
+  bg2: string;
+  surface: string;
+  border: string;
+  text: string;
+  textDim?: string;
+  accent: string;
+  glassBlur?: number;
+  glassOpacity?: number;
+  borderRadius?: number;
+  fontFamily?: string;
+}
+
 export interface Settings {
   version: number;
   theme: "dark" | "light" | "system" | string;
@@ -58,6 +225,7 @@ export interface Settings {
   showExtensions: boolean;
   confirmDelete: boolean;
   previewOpen: boolean;
+  previewWidth?: number;
   sidebarOpen: boolean;
   sidebarWidth: number;
   restoreSession: boolean;
@@ -68,8 +236,17 @@ export interface Settings {
   faytEnabled?: boolean;
   vimModeEnabled?: boolean;
   chromaticHeatmap?: boolean;
+  customAccentColor?: string;
+  glassBlur?: number;
+  glassOpacity?: number;
+  borderRadius?: number;
+  fontFamily?: string;
+  customThemes?: CustomThemeDefinition[];
+  activeCustomTheme?: CustomThemeDefinition | null;
+  visibleColumns?: ColumnId[];
 }
 
+export type ColumnId = "name" | "modified" | "created" | "type" | "size" | "ext";
 export type SortKey = "name" | "modified" | "size" | "type" | "created";
 export type ViewMode = "list" | "grid" | "columns";
 
@@ -83,6 +260,8 @@ export interface TextPreview {
   truncated: boolean;
   size: number;
 }
+
+export type PreviewTab = "preview" | "actions" | "shelf" | "git" | "meta" | "summary";
 
 export type PreviewKind =
   | "text"
@@ -172,9 +351,9 @@ export type SearchEvent =
 export type FolderSizeEvent =
   | { event: "progress"; data: { taskId: string; files: number; folders: number; bytes: number } }
   | {
-      event: "done";
-      data: { taskId: string; size: number; files: number; folders: number; elapsedMs: number };
-    }
+    event: "done";
+    data: { taskId: string; size: number; files: number; folders: number; elapsedMs: number };
+  }
   | { event: "error"; data: { taskId: string; message: string } };
 
 export interface ConflictInfo {
@@ -191,32 +370,32 @@ export interface ConflictInfo {
 
 export type JobEvent =
   | {
-      event: "started";
-      data: { jobId: string; kind: string; totalFiles: number; totalBytes: number };
-    }
+    event: "started";
+    data: { jobId: string; kind: string; totalFiles: number; totalBytes: number };
+  }
   | {
-      event: "progress";
-      data: {
-        jobId: string;
-        processedBytes: number;
-        processedFiles: number;
-        totalBytes: number;
-        totalFiles: number;
-        speedBps: number;
-        etaSecs: number;
-        currentFile: string | null;
-      };
-    }
+    event: "progress";
+    data: {
+      jobId: string;
+      processedBytes: number;
+      processedFiles: number;
+      totalBytes: number;
+      totalFiles: number;
+      speedBps: number;
+      etaSecs: number;
+      currentFile: string | null;
+    };
+  }
   | {
-      event: "fileDone";
-      data: { jobId: string; path: string; ok: boolean; error: string | null };
-    }
+    event: "fileDone";
+    data: { jobId: string; path: string; ok: boolean; error: string | null };
+  }
   | { event: "conflict"; data: ConflictInfo }
   | { event: "state"; data: { jobId: string; state: string } }
   | {
-      event: "error";
-      data: { jobId: string; message: string; path: string | null };
-    };
+    event: "error";
+    data: { jobId: string; message: string; path: string | null };
+  };
 
 export interface UndoStatus {
   canUndo: boolean;
@@ -243,7 +422,8 @@ export type AccelerationMode =
   | "nvme_direct_stream"
   | "parallel_batch"
   | "sparse_hole_punch"
-  | "standard_stream";
+  | "standard_stream"
+  | "atomic_volume_move";
 
 export type QosProfile = "uncapped" | "gaming" | "battery" | "whisper";
 
@@ -265,6 +445,8 @@ export interface TransferJob {
   id: string;
   kind: TransferKind;
   state: "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  sources?: string[];
+  destination?: string;
   totalFiles: number;
   processedFiles: number;
   totalBytes: number;
@@ -292,7 +474,7 @@ export interface TransferJob {
 export interface ContextMenuItem {
   id?: string;
   label?: string;
-  icon?: "open" | "reveal" | "copy" | "cut" | "paste" | "rename" | "delete" | "newfolder" | "newfile" | "properties" | "hash" | "refresh" | "terminal" | "star" | "info" | "permanent" | "preview" | "sort" | "view" | "newtab";
+  icon?: "open" | "reveal" | "copy" | "cut" | "paste" | "rename" | "delete" | "newfolder" | "newfile" | "properties" | "hash" | "refresh" | "terminal" | "star" | "info" | "permanent" | "preview" | "sort" | "view" | "newtab" | "sparkles";
   shortcut?: string;
   danger?: boolean;
   disabled?: boolean;
@@ -324,6 +506,7 @@ export interface PromptConfig {
 }
 
 export interface Tab {
+  quickFilter?: string;
   id: string;
   path: string;
   title: string;
@@ -595,7 +778,123 @@ export interface CloneResult {
   elapsedMs: number;
 }
 
-export type ShredAlgorithm = "zero" | "random" | "dod3" | "dod7" | "gutmann";
+export type ShredAlgorithm = "zero" | "random" | "dod3" | "dod7" | "gutmann" | "nist-clear" | "nist-purge";
+
+export interface SanitizationCertificate {
+  certificateId: string;
+  timestampUtc: string;
+  operator: string;
+  systemHostname: string;
+  mediaPath: string;
+  mediaType: string;
+  standard: string;
+  method: string;
+  algorithmApplied: ShredAlgorithm;
+  bytesSanitized: number;
+  preShredDigest: string;
+  postVerificationStatus: string;
+  cryptographicSeal: string;
+}
+
+export interface IoRingCapabilities {
+  supported: boolean;
+  apiVersion: number;
+  maxQueueDepth: number;
+  submissionQueueSize: number;
+  completionQueueSize: number;
+  kernelAccelerated: boolean;
+  fallbackMode: string;
+}
+
+export interface ChunkInfo {
+  offset: number;
+  length: number;
+  blake3Hash: string;
+}
+
+export interface SharedBlockSample {
+  chunkHash: string;
+  chunkSize: number;
+  occurrenceCount: number;
+  referencedInFiles: string[];
+}
+
+export interface BlockDeduplicationReport {
+  totalFilesAnalyzed: number;
+  totalBytesRaw: number;
+  totalChunksProduced: number;
+  uniqueChunksCount: number;
+  uniqueBytes: number;
+  duplicateChunksCount: number;
+  duplicateBytesSaved: number;
+  deduplicationRatio: number;
+  elapsedMs: number;
+  sharedBlockSamples: SharedBlockSample[];
+}
+
+export type EntropyClassification =
+  | "plaintext"
+  | "structuredData"
+  | "compressedMedia"
+  | "encryptedOrRansomwareSuspect";
+
+export interface ChunkEntropy {
+  offset: number;
+  length: number;
+  entropy: number;
+}
+
+export interface EntropyReport {
+  filePath: string;
+  fileSize: number;
+  overallEntropy: number;
+  headerEntropy: number;
+  tailEntropy: number;
+  classification: EntropyClassification;
+  confidenceScore: number;
+  detectedMagic?: string;
+  chunkDistribution: ChunkEntropy[];
+  elapsedMs: number;
+  advisory: string;
+}
+
+export interface MerkleLeaf {
+  relativePath: string;
+  fileSize: number;
+  modifiedMs: number;
+  leafHash: string;
+}
+
+export interface MerkleProof {
+  targetRelativePath: string;
+  leafHash: string;
+  leafIndex: number;
+  totalLeaves: number;
+  auditPath: Array<[string, boolean]>;
+  expectedRootHash: string;
+  isValid: boolean;
+}
+
+export interface MerkleTreeReport {
+  rootPath: string;
+  merkleRootHash: string;
+  totalFiles: number;
+  totalBytes: number;
+  treeDepth: number;
+  elapsedMs: number;
+  leaves: MerkleLeaf[];
+}
+
+export interface MerkleDiffReport {
+  rootHashA: string;
+  rootHashB: string;
+  isIdentical: boolean;
+  addedFiles: string[];
+  removedFiles: string[];
+  modifiedFiles: string[];
+  unmodifiedCount: number;
+  elapsedMs: number;
+}
 
 export interface ShredReport {
   filesDestroyed: number;
@@ -604,6 +903,7 @@ export interface ShredReport {
   algorithm: ShredAlgorithm;
   elapsedMs: number;
   errors: string[];
+  advisory?: string;
 }
 
 export type GitFileStatus =
@@ -771,6 +1071,22 @@ export type CopilotActionKind =
   | "disk_treemap"
   | "git_status";
 
+export interface CopilotCandidateItem {
+  path: string;
+  name: string;
+  isDir: boolean;
+  size: number;
+  formattedSize: string;
+  ext?: string;
+}
+
+export interface AgentPlanStep {
+  stepNumber: number;
+  actionKind: string;
+  title: string;
+  status: "pending" | "running" | "completed" | "failed";
+}
+
 export interface CopilotPlan {
   planId?: string;
   rawPrompt: string;
@@ -787,8 +1103,10 @@ export interface CopilotPlan {
   tagName?: string | null;
   outputPath?: string | null;
   matchedFiles: string[];
+  matchedCandidates?: CopilotCandidateItem[];
   totalMatchedBytes: number;
   explanation: string;
+  steps?: AgentPlanStep[];
 }
 
 export interface CopilotExecutionResult {
@@ -869,6 +1187,14 @@ export interface DevDriveReport {
   packageCaches: PackageCacheAudit[];
   hasDevDrive: boolean;
   recommendedActions: string[];
+}
+
+export interface PackageCacheMigrationResult {
+  ecosystem: string;
+  sourcePath: string;
+  targetPath: string;
+  junctionCreated: boolean;
+  message: string;
 }
 
 export interface BitLockerVolumeStatus {
@@ -1215,6 +1541,19 @@ export interface JanitorScanReport {
 export interface JanitorCleanResult {
   cleanedTargets: number;
   bytesFreed: number;
+  errors: string[];
+}
+
+export interface EmptyDirsReport {
+  rootPath: string;
+  emptyDirs: string[];
+  scannedDirs: number;
+  elapsedMs: number;
+}
+
+export interface EmptyDirsCleanResult {
+  removedCount: number;
+  failedCount: number;
   errors: string[];
 }
 

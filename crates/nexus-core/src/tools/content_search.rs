@@ -107,7 +107,7 @@ where
     let mut all_matches = Vec::new();
     let mut files_searched = 0;
 
-    for entry in jwalk::WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
         if let Some(cancel) = cancel_flag {
             if cancel.load(Ordering::Relaxed) {
                 break;
@@ -122,13 +122,13 @@ where
             let p = entry.path();
             // Skip large files (> 50 MB) and binaries
             if let Ok(meta) = p.metadata() {
-                if meta.len() > 50 * 1024 * 1024 || is_binary_header(&p) {
+                if meta.len() > 50 * 1024 * 1024 || is_binary_header(p) {
                     continue;
                 }
             }
 
             files_searched += 1;
-            let file_matches = search_in_file(&p, &matcher, 50);
+            let file_matches = search_in_file(p, &matcher, 50);
             for m in file_matches {
                 on_match_found(&m);
                 all_matches.push(m);

@@ -76,7 +76,7 @@ export function VdfsModal({ isOpen, onClose }: Props) {
   return (
     <div className="palette-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
       <div
-        className="palette"
+        className="palette" role="dialog" aria-modal="true" aria-label="Content-addressed storage"
         onClick={(e) => e.stopPropagation()}
         style={{ width: 720, maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
@@ -95,7 +95,7 @@ export function VdfsModal({ isOpen, onClose }: Props) {
             <button className="icon-btn" onClick={loadSummary} title="Refresh VDFS status">
               <RefreshCw size={14} className={loading ? "spin" : ""} />
             </button>
-            <button className="icon-btn" onClick={onClose}>
+            <button className="icon-btn" aria-label="Close content-addressed storage" onClick={onClose}>
               <X size={16} />
             </button>
           </div>

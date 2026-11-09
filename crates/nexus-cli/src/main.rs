@@ -74,6 +74,10 @@ fn print_usage() {
     println!("  nexus-cli janitor [scan|clean] [path]");
     println!("  nexus-cli dlp <paths...>");
     println!("  nexus-cli mount <source> [drive_letter]");
+    println!("  nexus-cli fastcdc <paths...> [--threshold <f64>]");
+    println!("  nexus-cli entropy <files...>");
+    println!("  nexus-cli sanitize <clear|purge> <targets...> [--operator <name>] [--witness <name>]");
+    println!("  nexus-cli merkle <build|proof|diff> [args...]");
     println!("  nexus-cli archive <list|extract|create> <archive> [args...]");
     println!("  nexus-cli par2 <file.par2>");
     println!("  nexus-cli gui [<folder>]");
@@ -2172,6 +2176,206 @@ fn cmd_mount(args: &[String]) {
     }
 }
 
+fn cmd_fastcdc(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("usage: nexus-cli fastcdc <paths...>");
+        exit(1);
+    }
+    let paths: Vec<PathBuf> = args.iter().map(PathBuf::from).collect();
+    match nexus_core::tools::fastcdc::analyze_block_deduplication(&paths) {
+        Ok(rep) => {
+            println!("=== FastCDC Sub-File Deduplication Report ===");
+            println!("Files Processed:      {}", rep.total_files_analyzed);
+            println!("Raw Combined Size:    {} ({})", rep.total_bytes_raw, fmt_bytes(rep.total_bytes_raw));
+            println!("Unique Stored Size:   {} ({})", rep.unique_bytes, fmt_bytes(rep.unique_bytes));
+            println!("Deduplication Ratio:  {:.2}x ({} saved)", rep.deduplication_ratio, fmt_bytes(rep.duplicate_bytes_saved));
+            println!("Total Chunks Found:   {}", rep.total_chunks_produced);
+            println!("Unique Chunk Hashes:  {}", rep.unique_chunks_count);
+            println!("Duplicate Chunks:     {}", rep.duplicate_chunks_count);
+            println!("Elapsed Time:         {} ms", rep.elapsed_ms);
+            if !rep.shared_block_samples.is_empty() {
+                println!("\nTop Shared Content Chunks (showing up to 5):");
+                for (idx, block) in rep.shared_block_samples.iter().take(5).enumerate() {
+                    println!("  #{}: Hash {}... ({} bytes across {} files)",
+                        idx + 1,
+                        &block.chunk_hash[..16.min(block.chunk_hash.len())],
+                        block.chunk_size,
+                        block.occurrence_count
+                    );
+                    for f in &block.referenced_in_files {
+                        println!("     -> {f}");
+                    }
+                }
+            }
+        }
+        Err(err) => {
+            eprintln!("fastcdc analysis error: {err}");
+            exit(1);
+        }
+    }
+}
+
+fn cmd_entropy(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("usage: nexus-cli entropy <files...>");
+        exit(1);
+    }
+    for file_str in args {
+        let p = Path::new(file_str);
+        match nexus_core::tools::entropy::inspect_file_entropy(p) {
+            Ok(rep) => {
+                println!("=== Shannon Entropy & Ransomware Threat Analysis ===");
+                println!("File:                 {}", rep.file_path);
+                println!("Size:                 {}", fmt_bytes(rep.file_size));
+                println!("Overall Shannon H:    {:.4} bits/byte (scale: 0.0 - 8.0)", rep.overall_entropy);
+                println!("Header Entropy:       {:.4} bits/byte", rep.header_entropy);
+                println!("Tail Entropy:         {:.4} bits/byte", rep.tail_entropy);
+                println!("Magic Header Sniffed: {}", rep.detected_magic.as_deref().unwrap_or("None (Raw / Unstructured)"));
+                println!("Classification:       {:?}", rep.classification);
+                println!("Suspect Ransomware:   {}", if rep.classification == nexus_core::tools::entropy::EntropyClassification::EncryptedOrRansomwareSuspect { "YES - ALERT" } else { "No" });
+                println!("Chunks Profiled:      {}", rep.chunk_distribution.len());
+                println!("Advisory Notice:      {}\n", rep.advisory);
+            }
+            Err(err) => {
+                eprintln!("entropy inspection error for {}: {err}", p.display());
+            }
+        }
+    }
+}
+
+fn cmd_sanitize(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("usage: nexus-cli sanitize <clear|purge> <targets...> [--operator <name>]");
+        exit(1);
+    }
+    let method_str = &args[0];
+    let algo = match method_str.to_lowercase().as_str() {
+        "clear" => nexus_core::tools::shredder::ShredAlgorithm::Nist80088Clear,
+        "purge" => nexus_core::tools::shredder::ShredAlgorithm::Nist80088Purge,
+        _ => {
+            eprintln!("invalid sanitize method '{}'; use 'clear' or 'purge'", method_str);
+            exit(1);
+        }
+    };
+    let mut operator = None;
+    let mut targets = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--operator" && i + 1 < args.len() {
+            operator = Some(args[i + 1].clone());
+            i += 2;
+        } else {
+            targets.push(args[i].clone());
+            i += 1;
+        }
+    }
+    if targets.is_empty() {
+        eprintln!("no target paths specified for NIST SP 800-88 sanitization");
+        exit(1);
+    }
+    println!("Initiating NIST SP 800-88 Rev 1 Forensic Media Sanitization ({algo:?})...");
+    for target in &targets {
+        let p = Path::new(target);
+        match nexus_core::tools::shredder::generate_sanitization_certificate(p, algo, operator.as_deref()) {
+            Ok(cert) => {
+                println!("\n{}", cert.to_markdown());
+            }
+            Err(e) => {
+                eprintln!("Sanitization error for {}: {e}", target);
+            }
+        }
+    }
+}
+
+fn cmd_merkle(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("usage: nexus-cli merkle <build|proof|diff> [args...]");
+        exit(1);
+    }
+    match args[0].as_str() {
+        "build" => {
+            let dir_str = args.get(1).map(|s| s.as_str()).unwrap_or(".");
+            let p = Path::new(dir_str);
+            match nexus_core::tools::merkle::build_merkle_tree(p) {
+                Ok(rep) => {
+                    println!("=== BLAKE3 Verifiable Merkle Tree Report ===");
+                    println!("Root Directory:       {}", rep.root_path);
+                    println!("Merkle Root Hash:     {}", rep.merkle_root_hash);
+                    println!("Total Leaves/Files:   {}", rep.total_files);
+                    println!("Total Payload Size:   {} ({})", rep.total_bytes, fmt_bytes(rep.total_bytes));
+                    println!("Tree Depth:           {}", rep.tree_depth);
+                    println!("Elapsed:              {} ms", rep.elapsed_ms);
+                    if !rep.leaves.is_empty() {
+                        println!("\nSample Leaf Hashes (first 5):");
+                        for (i, leaf) in rep.leaves.iter().take(5).enumerate() {
+                            println!("  #{}: {} -> {} ({} bytes)", i + 1, leaf.relative_path, &leaf.leaf_hash[..16], leaf.file_size);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("merkle build error: {e}");
+                    exit(1);
+                }
+            }
+        }
+        "proof" => {
+            if args.len() < 3 {
+                eprintln!("usage: nexus-cli merkle proof <dir> <relative_file_path>");
+                exit(1);
+            }
+            let dir = Path::new(&args[1]);
+            let rel = &args[2];
+            match nexus_core::tools::merkle::generate_merkle_proof(dir, rel) {
+                Ok(proof) => {
+                    println!("=== Merkle Inclusion Proof (O(log N)) ===");
+                    println!("Target File:          {}", proof.target_relative_path);
+                    println!("Leaf Hash:            {}", proof.leaf_hash);
+                    println!("Leaf Index:           {} / {}", proof.leaf_index, proof.total_leaves);
+                    println!("Expected Root:        {}", proof.expected_root_hash);
+                    println!("Witness Audit Steps:  {}", proof.audit_path.len());
+                    println!("Proof Authenticity:   {}", if proof.is_valid { "VERIFIED (Cryptographically Authentic)" } else { "FAILED" });
+                }
+                Err(e) => {
+                    eprintln!("merkle proof error: {e}");
+                    exit(1);
+                }
+            }
+        }
+        "diff" => {
+            if args.len() < 3 {
+                eprintln!("usage: nexus-cli merkle diff <dir_a> <dir_b>");
+                exit(1);
+            }
+            let dir_a = Path::new(&args[1]);
+            let dir_b = Path::new(&args[2]);
+            let tree_a = nexus_core::tools::merkle::build_merkle_tree(dir_a).expect("build tree a");
+            let tree_b = nexus_core::tools::merkle::build_merkle_tree(dir_b).expect("build tree b");
+            let diff = nexus_core::tools::merkle::compare_merkle_trees(&tree_a, &tree_b);
+            println!("=== Merkle Tree Differential Audit ===");
+            println!("Root A:        {}", diff.root_hash_a);
+            println!("Root B:        {}", diff.root_hash_b);
+            println!("Identical:     {}", diff.is_identical);
+            println!("Unmodified:    {} files", diff.unmodified_count);
+            println!("Modified:      {} files", diff.modified_files.len());
+            for f in &diff.modified_files {
+                println!("  ~ MODIFIED: {f}");
+            }
+            println!("Added:         {} files", diff.added_files.len());
+            for f in &diff.added_files {
+                println!("  + ADDED:    {f}");
+            }
+            println!("Removed:       {} files", diff.removed_files.len());
+            for f in &diff.removed_files {
+                println!("  - REMOVED:  {f}");
+            }
+        }
+        other => {
+            eprintln!("unknown merkle action: {other}; use build, proof, or diff");
+            exit(1);
+        }
+    }
+}
+
 fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
     if raw.is_empty() {
@@ -2179,6 +2383,10 @@ fn main() {
         return;
     }
     match raw[0].as_str() {
+        "merkle" => cmd_merkle(&raw[1..]),
+        "fastcdc" => cmd_fastcdc(&raw[1..]),
+        "entropy" => cmd_entropy(&raw[1..]),
+        "sanitize" => cmd_sanitize(&raw[1..]),
         "vdfs" => cmd_vdfs(&raw[1..]),
         "webdrop" => cmd_webdrop(&raw[1..]),
         "janitor" => cmd_janitor(&raw[1..]),
@@ -2557,5 +2765,66 @@ mod tests {
         // 5. Virtual Mount Available Letter
         let letter = nexus_core::tools::mounter::find_available_drive_letter();
         assert!(letter.is_some());
+    }
+
+    #[test]
+    fn test_fastcdc_and_entropy_and_sanitize_cli_flows() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // 1. FastCDC Deduplication Test
+        let f1 = dir.path().join("dedup1.dat");
+        let f2 = dir.path().join("dedup2.dat");
+        let sample_data = b"Repeating content chunk buffer for FastCDC rolling Gear Hash verification!".repeat(200);
+        std::fs::write(&f1, &sample_data).unwrap();
+        std::fs::write(&f2, &sample_data).unwrap();
+
+        let paths = vec![f1.clone(), f2.clone()];
+        let dedup_rep = nexus_core::tools::fastcdc::analyze_block_deduplication(&paths).unwrap();
+        assert_eq!(dedup_rep.total_files_analyzed, 2);
+        assert!(dedup_rep.duplicate_chunks_count > 0);
+        assert!(dedup_rep.deduplication_ratio >= 1.5);
+
+        // 2. Entropy & Threat Inspector Test
+        let plain_file = dir.path().join("plain.txt");
+        std::fs::write(&plain_file, b"Plain text readable english sentences without any encryption.").unwrap();
+        let plain_rep = nexus_core::tools::entropy::inspect_file_entropy(&plain_file).unwrap();
+        assert!(plain_rep.overall_entropy < 5.0);
+        assert_ne!(plain_rep.classification, nexus_core::tools::entropy::EntropyClassification::EncryptedOrRansomwareSuspect);
+
+        let random_file = dir.path().join("random.bin");
+        let random_bytes: Vec<u8> = (0..8192).map(|i| ((i * 101 + 37) % 256) as u8).collect();
+        std::fs::write(&random_file, &random_bytes).unwrap();
+        let random_rep = nexus_core::tools::entropy::inspect_file_entropy(&random_file).unwrap();
+        assert!(random_rep.overall_entropy > 7.5);
+
+        // 3. NIST SP 800-88 Sanitization Test
+        let sanitize_target = dir.path().join("classified.dat");
+        std::fs::write(&sanitize_target, b"Classified military grade secret payload").unwrap();
+
+        let cert = nexus_core::tools::shredder::generate_sanitization_certificate(
+            &sanitize_target,
+            nexus_core::tools::shredder::ShredAlgorithm::Nist80088Clear,
+            Some("Forensic Specialist"),
+        ).unwrap();
+        assert_eq!(cert.algorithm_applied, nexus_core::tools::shredder::ShredAlgorithm::Nist80088Clear);
+        assert!(!cert.cryptographic_seal.is_empty());
+        assert!(!sanitize_target.exists());
+    }
+
+    #[test]
+    fn test_merkle_cli_flow() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("src");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("main.rs"), b"fn main() {}").unwrap();
+        std::fs::write(dir.path().join("readme.md"), b"# Nexus Merkle Proof").unwrap();
+
+        let tree = nexus_core::tools::merkle::build_merkle_tree(dir.path()).unwrap();
+        assert_eq!(tree.total_files, 2);
+        assert!(!tree.merkle_root_hash.is_empty());
+
+        let proof = nexus_core::tools::merkle::generate_merkle_proof(dir.path(), "src/main.rs").unwrap();
+        assert!(proof.is_valid);
+        assert_eq!(proof.target_relative_path, "src/main.rs");
     }
 }

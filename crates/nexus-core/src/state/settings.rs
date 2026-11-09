@@ -31,6 +31,20 @@ pub struct Settings {
     pub animations: bool,
     #[serde(default = "default_zoom")]
     pub zoom: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_accent_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glass_blur: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glass_opacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_radius: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_themes: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_custom_theme: Option<serde_json::Value>,
 }
 
 fn default_zoom() -> u32 {
@@ -60,6 +74,13 @@ impl Default for Settings {
             recent_limit: 30,
             animations: true,
             zoom: 100,
+            custom_accent_color: None,
+            glass_blur: None,
+            glass_opacity: None,
+            border_radius: None,
+            font_family: None,
+            custom_themes: None,
+            active_custom_theme: None,
         }
     }
 }
@@ -71,13 +92,18 @@ impl Settings {
         if self.version == 0 {
             self.version = SETTINGS_VERSION;
         }
-        if !matches!(self.theme.as_str(), "dark" | "light" | "system") {
+        let trimmed_theme = self.theme.trim();
+        if trimmed_theme.is_empty() {
             self.theme = "dark".into();
+        } else if trimmed_theme.len() > 64 {
+            self.theme = trimmed_theme[..64].to_string();
+        } else {
+            self.theme = trimmed_theme.to_string();
         }
         if !matches!(self.density.as_str(), "comfortable" | "compact") {
             self.density = "comfortable".into();
         }
-        if !matches!(self.view.as_str(), "list" | "grid") {
+        if !matches!(self.view.as_str(), "list" | "grid" | "columns") {
             self.view = "list".into();
         }
         if !matches!(
@@ -118,5 +144,25 @@ mod tests {
         assert_eq!(settings.view, "list");
         let settings = settings.sanitised();
         assert_eq!(settings.sidebar_width, 268);
+    }
+
+    #[test]
+    fn preserves_custom_and_extended_themes() {
+        let settings = Settings {
+            theme: "mica".into(),
+            view: "columns".into(),
+            custom_accent_color: Some("#ff007f".into()),
+            ..Default::default()
+        };
+        let sanitised = settings.sanitised();
+        assert_eq!(sanitised.theme, "mica");
+        assert_eq!(sanitised.view, "columns");
+        assert_eq!(sanitised.custom_accent_color, Some("#ff007f".into()));
+
+        let custom = Settings {
+            theme: "catppuccin-custom".into(),
+            ..Default::default()
+        };
+        assert_eq!(custom.sanitised().theme, "catppuccin-custom");
     }
 }

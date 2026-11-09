@@ -59,16 +59,22 @@ graph TD
 
 ### Directory Navigation & Views
 * **Multiple Layout Modes**: Toggle between Details List, Virtual Grid, and cascading Miller Columns (`Ctrl+1`, `Ctrl+2`, `Ctrl+3`).
-* **Tree-in-List Expansion**: Expand folders inline within the details list to inspect nested directory hierarchies without losing scroll position.
+* **Multi-Level Tree-in-List Expansion**: Expand folders inline recursively to arbitrary depth levels within the details list to inspect nested directory hierarchies without losing scroll position.
+* **Interactive Breadcrumbs**: Breadcrumb separator chevrons display subfolder popover menus for instant child/sibling navigation; trailing history dropdown provides one-click access to recent and visited locations.
+* **Search & Switch Open Tabs**: Total Commander–style tab list switcher (`Ctrl+Shift+A`) with real-time fuzzy search by title, path, or color group.
+* **Go to Folder Dialog**: Direct path navigation (`Ctrl+G`) with debounced path validation and quick destination chips (Home, Desktop, Documents, Downloads, Drives, WSL).
+* **Configurable Dynamic Columns**: Toggle visible columns (Date modified, Date created, Type, Size, Extension) with right-click header menu and layout persistence.
 * **Automatic Folder Sizing**: Asynchronous background sizing queues calculate folder capacities upon navigation without blocking UI interaction.
-* **Dual-Pane Workspaces**: Split directory views horizontally or vertically with optional synchronized scrolling for side-by-side directory comparisons.
+* **Dual-Pane Workspaces**: Split directory views horizontally or vertically with synchronized navigation (`Ctrl+Shift+D`) and dual-pane directory content comparison with automatic difference selection (`Ctrl+Shift+E`).
 
-### Search & Navigation
+### Search, Selection & Navigation
+* **Orthodox Selection Tools**: Total Commander–style Select by Pattern (`Ctrl+Shift+S` / `+`) with wildcards, extensions, regex, and live match counters; and Invert Selection (`Ctrl+Shift+I` / `*`).
 * **Find-As-You-Type (FAYT)**:
   * `'` (single quote): In-view filtering.
   * `+` (plus): Indexed fast search across mounted drives.
   * `>` (greater-than): Inline shell command execution.
   * `]` (bracket): Bookmark fast-jump.
+* **Multi-Format Archive Engine**: Pack and extract archives natively (pure Rust ZIP) or via 7-Zip (`.7z`, `.tar.gz`, `.tar`) with configurable compression levels (Store to Ultra).
 * **Vim Navigation**: Full modal navigation support (`h`, `j`, `k`, `l`, `gg`, `G`, `y`, `d`, `p`).
 * **Gamepad Support**: Navigation through standard Gamepad API controllers for handheld Windows devices.
 
@@ -129,6 +135,13 @@ nexus-cli vault decrypt C:\Vault.nxvault C:\Restored --pass "Passphrase"
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Switch between List, Grid, and Miller Columns |
+| `Ctrl+G` | Open "Go to Folder" Navigation Modal |
+| `Ctrl+Shift+A` | Search & Switch Open Tabs |
+| `Ctrl+Shift+S` / `+` | Select by Pattern Dialog (Wildcards, Extensions, Regex) |
+| `Ctrl+Shift+I` / `*` | Invert Current Selection |
+| `Ctrl+Shift+C` | Copy Full Path(s) to Clipboard |
+| `Ctrl+Shift+D` | Toggle Dual-Pane Synchronized Navigation |
+| `Ctrl+Shift+E` | Compare Dual Panes & Highlight Content Differences |
 | `'` (Single Quote) | Open FAYT live in-view filter |
 | `+` (Plus) | Open FAYT fast global search |
 | `>` (Greater Than) | Open FAYT inline terminal runner |
@@ -185,6 +198,27 @@ nexus-cli vault decrypt C:\Vault.nxvault C:\Restored --pass "Passphrase"
    The compiled executable and NSIS installer will be located in:
    * Binary: `target/release/nexus-explorer.exe`
    * Installer: `target/release/bundle/nsis/Nexus Explorer_2.0.0_x64-setup.exe`
+
+---
+
+## Architectural & Research Documentation
+
+Detailed engineering reports and competitive analyses are available in the [`docs/`](docs/) directory:
+
+1. [Existing Project Assessment](docs/01-EXISTING-PROJECT-ASSESSMENT.md)
+2. [Deep Competitive Research Report](docs/02-COMPETITIVE-RESEARCH-REPORT.md)
+3. [Competitor Comparison Matrix](docs/03-COMPETITOR-COMPARISON-MATRIX.md)
+4. [Exhaustive Feature Requirements Catalogue](docs/04-EXHAUSTIVE-REQUIREMENTS-CATALOGUE.md)
+5. [Identified User Problems Catalogue](docs/05-IDENTIFIED-USER-PROBLEMS-CATALOGUE.md)
+6. [Bugs, Technical Debt, & Limitations Register](docs/06-BUGS-AND-LIMITATIONS-REGISTER.md)
+7. [Prioritized Engineering Roadmap](docs/07-ENGINEERING-ROADMAP.md)
+8. [Architecture Improvement Report](docs/08-ARCHITECTURE-IMPROVEMENT-REPORT.md)
+9. [Implementation Changelog](docs/09-IMPLEMENTATION-CHANGELOG.md)
+10. [Performance Benchmark Report](docs/10-PERFORMANCE-BENCHMARK-REPORT.md)
+11. [Security Review & Reliability Report](docs/11-SECURITY-REVIEW-REPORT.md)
+12. [Comprehensive Test Results](docs/12-COMPREHENSIVE-TEST-RESULTS.md)
+13. [Remaining Limitations & Known Issues](docs/13-REMAINING-LIMITATIONS-AND-KNOWN-ISSUES.md)
+14. [Production Readiness Assessment](docs/14-PRODUCTION-READINESS-ASSESSMENT.md)
 
 ---
 

@@ -3,6 +3,7 @@
 pub mod cow;
 pub mod drives;
 pub mod folder_size;
+pub mod ioring;
 pub mod known;
 pub mod listing;
 pub mod ops;
@@ -10,6 +11,7 @@ pub mod preview;
 
 pub use drives::enumerate_drives;
 pub use folder_size::calculate_folder_size;
+pub use ioring::{execute_batch_read, query_ioring_capabilities, IoRingBatchItem, IoRingBatchResult, IoRingCapabilities};
 pub use known::known_folders;
 pub use listing::{attributes, read_dir, sort_entries, stat_path};
 pub use ops::{

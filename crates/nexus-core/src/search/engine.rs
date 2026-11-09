@@ -45,59 +45,93 @@ impl SearchRegistry {
     }
 }
 
-struct Matcher {
-    segments: Vec<String>,
-    substring: Option<String>,
+enum MatchStrategy {
+    Everything,
+    Substring(String),
+    Extension(String),
+    CompiledRegex(regex::Regex),
+}
+
+pub struct Matcher {
+    strategy: MatchStrategy,
 }
 
 impl Matcher {
-    fn new(query: &str) -> Self {
-        let lowered = query.trim().to_lowercase();
-        if lowered.contains('*') {
-            let segments: Vec<String> = lowered
-                .split('*')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect();
-            Matcher {
-                segments,
-                substring: None,
+    pub fn new(query: &str) -> Self {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Self {
+                strategy: MatchStrategy::Everything,
+            };
+        }
+
+        let lowered = trimmed.to_lowercase();
+
+        // 1. Regex query: regex:<pattern> or re:<pattern>
+        if let Some(pattern) = trimmed
+            .strip_prefix("regex:")
+            .or_else(|| trimmed.strip_prefix("re:"))
+        {
+            if let Ok(re) = regex::RegexBuilder::new(pattern)
+                .case_insensitive(true)
+                .build()
+            {
+                return Self {
+                    strategy: MatchStrategy::CompiledRegex(re),
+                };
             }
-        } else if lowered.is_empty() {
-            Matcher {
-                segments: Vec::new(),
-                substring: None,
+        }
+
+        // 2. Extension query: ext:<ext>
+        if let Some(ext) = lowered.strip_prefix("ext:") {
+            let clean_ext = ext.trim_start_matches('.').to_string();
+            return Self {
+                strategy: MatchStrategy::Extension(clean_ext),
+            };
+        }
+
+        // 3. Wildcard / Glob query containing '*' or '?'
+        if lowered.contains('*') || lowered.contains('?') {
+            let mut pattern = String::from("^");
+            for ch in lowered.chars() {
+                match ch {
+                    '*' => pattern.push_str(".*"),
+                    '?' => pattern.push('.'),
+                    '.' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                        pattern.push('\\');
+                        pattern.push(ch);
+                    }
+                    other => pattern.push(other),
+                }
             }
-        } else {
-            Matcher {
-                segments: Vec::new(),
-                substring: Some(lowered),
+            pattern.push('$');
+            if let Ok(re) = regex::RegexBuilder::new(&pattern)
+                .case_insensitive(true)
+                .build()
+            {
+                return Self {
+                    strategy: MatchStrategy::CompiledRegex(re),
+                };
             }
+        }
+
+        // 4. Default: Fast case-insensitive substring
+        Self {
+            strategy: MatchStrategy::Substring(lowered),
         }
     }
 
-    fn matches(&self, name: &str) -> bool {
-        let lowered = name.to_lowercase();
-        if let Some(sub) = &self.substring {
-            return lowered.contains(sub);
+    pub fn matches(&self, name: &str) -> bool {
+        match &self.strategy {
+            MatchStrategy::Everything => true,
+            MatchStrategy::Substring(sub) => name.to_lowercase().contains(sub),
+            MatchStrategy::Extension(target_ext) => Path::new(name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case(target_ext))
+                .unwrap_or(false),
+            MatchStrategy::CompiledRegex(re) => re.is_match(name),
         }
-        if self.segments.is_empty() {
-            return true;
-        }
-        let mut cursor = 0usize;
-        for (i, seg) in self.segments.iter().enumerate() {
-            match lowered[cursor..].find(seg.as_str()) {
-                Some(pos) => {
-                    let absolute = cursor + pos;
-                    if i == 0 && absolute != 0 && lowered.starts_with(self.segments[0].as_str()) {
-                        continue;
-                    }
-                    cursor = absolute + seg.len();
-                }
-                None => return false,
-            }
-        }
-        true
     }
 }
 
@@ -231,8 +265,27 @@ mod tests {
         let matcher = Matcher::new("*.pdf");
         assert!(matcher.matches("invoice.pdf"));
         assert!(!matcher.matches("invoice.txt"));
+        assert!(!matcher.matches("invoice.pdf.bak"));
         let matcher = Matcher::new("nexus*2027");
         assert!(matcher.matches("nexus-explorer-2027"));
+        assert!(!matcher.matches("nexus-explorer-2028"));
+    }
+
+    #[test]
+    fn regex_and_glob_extensions_matching() {
+        let matcher = Matcher::new("doc?.txt");
+        assert!(matcher.matches("doc1.txt"));
+        assert!(matcher.matches("docA.txt"));
+        assert!(!matcher.matches("doc12.txt"));
+
+        let matcher = Matcher::new("regex:^IMG_\\d{3}\\.jpg$");
+        assert!(matcher.matches("IMG_101.jpg"));
+        assert!(!matcher.matches("IMG_1011.jpg"));
+        assert!(!matcher.matches("other.jpg"));
+
+        let matcher = Matcher::new("ext:json");
+        assert!(matcher.matches("package.json"));
+        assert!(!matcher.matches("package.json.bak"));
     }
 
     #[test]

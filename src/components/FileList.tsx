@@ -1,3 +1,4 @@
+import RenameInput from "./RenameInput";
 import { useMemo, useRef, useState, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAppStore } from "@/state/store";
@@ -9,43 +10,54 @@ import { isImageExt } from "@/lib/format";
 import { assetUrl, ipc } from "@/lib/ipc";
 import { beginDrag } from "@/lib/dnd";
 import { normalizePath, samePath } from "@/lib/paths";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { handleVimKeyEvent } from "@/lib/vimNavigation";
-import type { GitFileStatus, FileEntry } from "@/types";
+import { useMarqueeSelection } from "@/hooks/useMarqueeSelection";
+import type { GitFileStatus, FileEntry, ColumnId, ContextMenuItem } from "@/types";
 
 export function FileList() {
   const store = useAppStore();
   const activeTab = store.tabs.find((t) => t.id === store.activeTabId)!;
   const settings = store.settings;
-  const baseRows = useMemo(() => visibleEntries(activeTab, settings), [activeTab, settings]);
+  const baseRows = useMemo(
+    () => visibleEntries(activeTab, settings, store.folderSizes),
+    [activeTab, settings, store.folderSizes],
+  );
+
+  const maxFolderSize = useMemo(() => {
+    let max = 1;
+    for (const e of baseRows) {
+      const s = e.isDir
+        ? (store.folderSizes[e.path]?.size ?? store.folderSizes[normalizePath(e.path)]?.size ?? store.folderSizes[normalizePath(e.path).toLowerCase()]?.size ?? 0)
+        : e.size;
+      if (s > max) max = s;
+    }
+    return max;
+  }, [baseRows, store.folderSizes]);
 
   // Automatically calculate folder sizes for visible directories
-  useEffect(() => {
-    if (!activeTab?.entries) return;
-    const dirs = activeTab.entries.filter((e) => e.isDir).map((e) => e.path);
-    if (dirs.length > 0) {
-      void store.autoCalculateFolderSizes(dirs);
-    }
-  }, [activeTab?.path, activeTab?.entries, store]);
+
 
   // Tree-in-List expanded subfolders state
   const [expandedFolders, setExpandedFolders] = useState<Record<string, FileEntry[]>>({});
-  const lastClickRef = useRef<{ path: string; time: number }>({ path: "", time: 0 });
 
   const toggleExpand = async (folderPath: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (expandedFolders[folderPath]) {
       const next = { ...expandedFolders };
-      delete next[folderPath];
+      const prefixSlash = folderPath.toLowerCase() + "/";
+      const prefixBackslash = folderPath.toLowerCase() + "\\";
+      for (const key of Object.keys(next)) {
+        const lower = key.toLowerCase();
+        if (lower === folderPath.toLowerCase() || lower.startsWith(prefixSlash) || lower.startsWith(prefixBackslash)) {
+          delete next[key];
+        }
+      }
       setExpandedFolders(next);
     } else {
       try {
         const subEntries = await ipc.readDir(folderPath);
         setExpandedFolders((prev) => ({ ...prev, [folderPath]: subEntries }));
-        const subDirs = subEntries.filter((e) => e.isDir).map((e) => e.path);
-        if (subDirs.length > 0) {
-          void store.autoCalculateFolderSizes(subDirs);
-        }
       } catch (err: any) {
         store.pushToast("error", "Expand Failed", err?.message || String(err));
       }
@@ -54,12 +66,21 @@ export function FileList() {
 
   const rows = useMemo(() => {
     const res: Array<FileEntry & { depth?: number; parentDir?: string }> = [];
+    const appendSubEntries = (parentPath: string, depth: number) => {
+      const children = expandedFolders[parentPath];
+      if (!children) return;
+      for (const sub of children) {
+        res.push({ ...sub, depth, parentDir: parentPath });
+        if (sub.isDir && expandedFolders[sub.path]) {
+          appendSubEntries(sub.path, depth + 1);
+        }
+      }
+    };
+
     for (const r of baseRows) {
       res.push({ ...r, depth: 0 });
       if (r.isDir && expandedFolders[r.path]) {
-        for (const sub of expandedFolders[r.path]) {
-          res.push({ ...sub, depth: 1, parentDir: r.path });
-        }
+        appendSubEntries(r.path, 1);
       }
     }
     return res;
@@ -75,6 +96,7 @@ export function FileList() {
     return out;
   }, [groups]);
   const parentRef = useRef<HTMLDivElement>(null);
+  const marquee = useMarqueeSelection({ containerRef: parentRef });
   const rowHeight = Math.round((settings.density === "compact" ? 26 : 32) * (settings.zoom / 100));
   const virtualizer = useVirtualizer({ count: flat.length, getScrollElement: () => parentRef.current, estimateSize: () => rowHeight, overscan: 14 });
   const [gitStatuses, setGitStatuses] = useState<Record<string, GitFileStatus>>({});
@@ -116,14 +138,16 @@ export function FileList() {
 
   const onRowPointerDown = (entry: (typeof rows)[number], e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest("button, input")) return;
-    const now = Date.now();
-    if (samePath(lastClickRef.current.path, entry.path) && (now - lastClickRef.current.time) < 500) {
-      lastClickRef.current = { path: "", time: 0 };
-      void store.openEntry(entry);
+    const target = e.target as HTMLElement;
+    if (target.closest("button, input")) return;
+
+    // Check if clicking filename/icon or secondary columns (Date, Type, Size)
+    const isNameCell = target.closest(".row-name-cell, .col-name");
+    if (!isNameCell) {
+      marquee.onPointerDown(e);
       return;
     }
-    lastClickRef.current = { path: entry.path, time: now };
+
     const selected = activeTab.selected;
     if (e.ctrlKey || e.metaKey) store.toggleSelection(entry.path);
     else if (e.shiftKey) store.selectRange(entry.path);
@@ -134,6 +158,7 @@ export function FileList() {
 
   const onRowPointerUp = (entry: (typeof rows)[number], e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    if (marquee.isMarqueeActive) return;
     if ((e.target as HTMLElement).closest("button, input")) return;
     if (!e.ctrlKey && !e.metaKey && !e.shiftKey && activeTab.selected.length > 1) {
       store.selectOnly(entry.path);
@@ -152,13 +177,59 @@ export function FileList() {
 
   const renaming = store.renamingPath;
 
+  const DEFAULT_COLS: ColumnId[] = ["name", "modified", "type", "size"];
+  const visibleCols = useMemo<ColumnId[]>(() => {
+    const cols = settings.visibleColumns;
+    return cols && cols.length > 0 ? cols : DEFAULT_COLS;
+  }, [settings.visibleColumns]);
+
+  const gridTemplateColumns = useMemo(() => {
+    const colSpecs: Record<ColumnId, string> = {
+      name: "minmax(120px, 1fr)",
+      modified: "minmax(90px, 135px)",
+      created: "minmax(90px, 135px)",
+      type: "minmax(50px, 80px)",
+      size: "minmax(55px, 85px)",
+      ext: "minmax(45px, 70px)",
+    };
+    return visibleCols.map((c) => colSpecs[c] || "minmax(60px, 100px)").join(" ") + " 24px";
+  }, [visibleCols]);
+
+  const openColumnMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const cols = settings.visibleColumns?.length ? settings.visibleColumns : DEFAULT_COLS;
+    const allCols: { id: ColumnId; label: string }[] = [
+      { id: "name", label: "Name" },
+      { id: "modified", label: "Date modified" },
+      { id: "created", label: "Date created" },
+      { id: "type", label: "Type" },
+      { id: "size", label: "Size" },
+      { id: "ext", label: "Extension" },
+    ];
+
+    const items: ContextMenuItem[] = [
+      ...allCols.map((c) => ({
+        label: `${cols.includes(c.id) ? "✓ " : "   "}${c.label}`,
+        action: () => store.toggleColumn(c.id),
+      })),
+      { separator: true },
+      {
+        label: "Reset to default columns",
+        action: () => store.resetColumns(),
+      },
+    ];
+    store.openContextMenu(e.clientX, e.clientY, items);
+  };
+
   return (
-    <div className="viewport" ref={parentRef} data-pane-id="primary" data-drop-path={activeTab.path} tabIndex={0}
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget || (e.target as HTMLElement).closest(".row, .filelist-head") === null) {
-          store.clearSelection();
-        }
-      }}
+    <div
+      className="viewport"
+      ref={parentRef}
+      data-pane-id="primary"
+      data-drop-path={activeTab.path}
+      tabIndex={0}
+      onPointerDown={marquee.onPointerDown}
       onKeyDown={(e) => {
         if (settings.vimModeEnabled !== false && handleVimKeyEvent(e.nativeEvent)) return;
         const rowEntries = flat.filter((i) => i.kind === "row").map((i) => i.entry!);
@@ -178,6 +249,24 @@ export function FileList() {
           e.preventDefault(); store.selectOnly(rowEntries[0].path); virtualizer.scrollToIndex(flat.findIndex((i) => i.entry?.path === rowEntries[0].path));
         } else if (e.key === "End") {
           e.preventDefault(); store.selectOnly(rowEntries[rowEntries.length - 1].path); virtualizer.scrollToIndex(flat.findIndex((i) => i.entry?.path === rowEntries[rowEntries.length - 1].path));
+        } else if (e.key === "Insert") {
+          e.preventDefault();
+          const current = idx < 0 ? 0 : idx;
+          store.toggleSelection(rowEntries[current].path);
+          const next = Math.min(rowEntries.length - 1, current + 1);
+          virtualizer.scrollToIndex(flat.findIndex((i) => i.entry?.path === rowEntries[next].path), { align: "auto" });
+        } else if (e.key === "PageDown") {
+          e.preventDefault();
+          const pageSize = Math.max(1, Math.floor((parentRef.current?.clientHeight ?? 400) / rowHeight));
+          const next = Math.min(rowEntries.length - 1, (idx < 0 ? 0 : idx) + pageSize);
+          if (e.shiftKey) store.selectRange(rowEntries[next].path); else store.selectOnly(rowEntries[next].path);
+          virtualizer.scrollToIndex(flat.findIndex((i) => i.entry?.path === rowEntries[next].path), { align: "auto" });
+        } else if (e.key === "PageUp") {
+          e.preventDefault();
+          const pageSize = Math.max(1, Math.floor((parentRef.current?.clientHeight ?? 400) / rowHeight));
+          const prev = Math.max(0, (idx < 0 ? 0 : idx) - pageSize);
+          if (e.shiftKey) store.selectRange(rowEntries[prev].path); else store.selectOnly(rowEntries[prev].path);
+          virtualizer.scrollToIndex(flat.findIndex((i) => i.entry?.path === rowEntries[prev].path), { align: "auto" });
         }
       }}
       onContextMenu={(e) => {
@@ -188,11 +277,60 @@ export function FileList() {
       }}
     >
       <div className="filelist">
-        <div className="filelist-head">
-          <div className="col-head col-name" onClick={() => store.toggleSort("name")}>Name <span className="sort-arrow">{activeTab.sortKey === "name" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span></div>
-          <div className="col-head col-modified" onClick={() => store.toggleSort("modified")}>Date modified <span className="sort-arrow">{activeTab.sortKey === "modified" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span></div>
-          <div className="col-head col-type" onClick={() => store.toggleSort("type")}>Type <span className="sort-arrow">{activeTab.sortKey === "type" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span></div>
-          <div className="col-head col-size" onClick={() => store.toggleSort("size")}>Size <span className="sort-arrow">{activeTab.sortKey === "size" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span></div>
+        <div className="filelist-head" style={{ gridTemplateColumns }} onContextMenu={openColumnMenu}>
+          {visibleCols.map((colId) => {
+            if (colId === "name") {
+              return (
+                <div key="name" className="col-head col-name" onClick={() => store.toggleSort("name")}>
+                  Name <span className="sort-arrow">{activeTab.sortKey === "name" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span>
+                </div>
+              );
+            }
+            if (colId === "modified") {
+              return (
+                <div key="modified" className="col-head col-modified" onClick={() => store.toggleSort("modified")}>
+                  Date modified <span className="sort-arrow">{activeTab.sortKey === "modified" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span>
+                </div>
+              );
+            }
+            if (colId === "created") {
+              return (
+                <div key="created" className="col-head col-created" onClick={() => store.toggleSort("created")}>
+                  Date created <span className="sort-arrow">{activeTab.sortKey === "created" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span>
+                </div>
+              );
+            }
+            if (colId === "type") {
+              return (
+                <div key="type" className="col-head col-type" onClick={() => store.toggleSort("type")}>
+                  Type <span className="sort-arrow">{activeTab.sortKey === "type" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span>
+                </div>
+              );
+            }
+            if (colId === "size") {
+              return (
+                <div key="size" className="col-head col-size" onClick={() => store.toggleSort("size")}>
+                  Size <span className="sort-arrow">{activeTab.sortKey === "size" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span>
+                </div>
+              );
+            }
+            if (colId === "ext") {
+              return (
+                <div key="ext" className="col-head col-ext" onClick={() => store.toggleSort("type")}>
+                  Ext <span className="sort-arrow">{activeTab.sortKey === "type" ? (activeTab.sortDesc ? "▼" : "▲") : ""}</span>
+                </div>
+              );
+            }
+            return null;
+          })}
+          <button
+            className="icon-btn"
+            style={{ width: 20, height: 20, padding: 0, opacity: 0.6, justifySelf: "end" }}
+            onClick={openColumnMenu}
+            title="Customize columns (right-click or click here)"
+          >
+            <SlidersHorizontal size={12} />
+          </button>
         </div>
         <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
           {virtualizer.getVirtualItems().map((vi) => {
@@ -239,7 +377,9 @@ export function FileList() {
             return (
               <div
                 key={entry.path}
+                data-path={entry.path}
                 className={`row ${selected ? "selected" : ""}`}
+                data-drop-path={entry.isDir ? entry.path : undefined}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -251,9 +391,18 @@ export function FileList() {
                   paddingLeft: 14 + depth * 18,
                   borderLeft: ageBorder,
                   background: selected ? undefined : ageBg,
+                  gridTemplateColumns,
                 }}
                 onPointerDown={(e) => onRowPointerDown(entry, e)}
                 onPointerUp={(e) => onRowPointerUp(entry, e)}
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest("button, input")) return;
+                  if (marquee.isMarqueeActive) return;
+                  if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                    store.selectOnly(entry.path);
+                  }
+                }}
+                onDragStart={(e) => e.preventDefault()}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   if ((e.target as HTMLElement).closest("button, input")) return;
@@ -261,124 +410,163 @@ export function FileList() {
                 }}
                 onContextMenu={(e) => onRowContextMenu(entry, e)}
               >
-                <div className="row-name-cell">
-                  {entry.isDir ? (
-                    <button
-                      className="icon-btn"
-                      style={{ width: 16, height: 16, padding: 0, marginRight: 2 }}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => toggleExpand(entry.path, e)}
-                      title={isExpanded ? "Collapse folder" : "Expand folder inline"}
-                    >
-                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    </button>
-                  ) : (
-                    <span style={{ width: 16, display: "inline-block", marginRight: 2 }} />
-                  )}
-                  <span className="row-icon">
-                    {isImageExt(entry.ext) ? (
-                      <img src={assetUrl(entry.path)} alt={entry.name} style={{ width: 18, height: 18, objectFit: "cover", borderRadius: 3 }} loading="lazy" />
-                    ) : (
-                      <span className={`file-icon tone-${tone}`}><Icon size={16} strokeWidth={1.7} /></span>
-                    )}
-                  </span>
-                  {renaming === entry.path ? (
-                    <RenameInput name={entry.name} onCommit={(n) => void store.renameTo(entry.path, n)} onCancel={() => store.setRenaming(null)} />
-                  ) : (
-                    <span className="row-name" title={entry.name}>{entry.name}</span>
-                  )}
-                  {gitStatus && gitStatus !== "unmodified" && (
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        padding: "1px 4px",
-                        borderRadius: 3,
-                        marginLeft: 6,
-                        background:
-                          gitStatus === "modified" ? "rgba(234, 179, 8, 0.15)" :
-                          gitStatus === "staged" ? "rgba(6, 182, 212, 0.15)" :
-                          gitStatus === "untracked" ? "rgba(34, 197, 94, 0.15)" :
-                          gitStatus === "conflicted" ? "rgba(239, 68, 68, 0.15)" :
-                          "rgba(255, 255, 255, 0.08)",
-                        color:
-                          gitStatus === "modified" ? "#eab308" :
-                          gitStatus === "staged" ? "#06b6d4" :
-                          gitStatus === "untracked" ? "#22c55e" :
-                          gitStatus === "conflicted" ? "#ef4444" :
-                          "var(--text-faint)",
-                      }}
-                      title={`Git: ${gitStatus}`}
-                    >
-                      {gitStatus === "modified" ? "M" :
-                       gitStatus === "staged" ? "S" :
-                       gitStatus === "untracked" ? "U" :
-                       gitStatus === "conflicted" ? "!" :
-                       "I"}
-                    </span>
-                  )}
-                  {(tagMap.get(entry.path.toLowerCase()) ?? []).map((color, i) => (
-                    <span
-                      key={`${color}-${i}`}
-                      title="Tagged"
-                      style={{ width: 7, height: 7, borderRadius: 4, background: color, marginLeft: 4, flexShrink: 0 }}
-                    />
-                  ))}
-                </div>
-                <div className="row-col row-col-modified">{formatDate(entry.modifiedMs)}</div>
-                <div className="row-col row-col-type">{entry.isDir ? "Folder" : (entry.ext.toUpperCase() || "File")}</div>
-                <div
-                  className="row-col row-col-size"
-                  onClick={(e) => {
-                    if (entry.isDir) {
-                      e.stopPropagation();
-                      void store.calculateFolderSize(entry.path);
-                    }
-                  }}
-                  title={
-                    entry.isDir
-                      ? (store.folderSizes[entry.path] ?? store.folderSizes[normalizePath(entry.path)] ?? store.folderSizes[normalizePath(entry.path).toLowerCase()])
-                        ? `${(store.folderSizes[entry.path] ?? store.folderSizes[normalizePath(entry.path)] ?? store.folderSizes[normalizePath(entry.path).toLowerCase()]).files} files, ${(store.folderSizes[entry.path] ?? store.folderSizes[normalizePath(entry.path)] ?? store.folderSizes[normalizePath(entry.path).toLowerCase()]).folders} folders (Click to recalculate)`
-                        : (store.folderSizeTasks[entry.path] ?? store.folderSizeTasks[normalizePath(entry.path)] ?? store.folderSizeTasks[normalizePath(entry.path).toLowerCase()])
-                          ? "Calculating folder size…"
-                          : "Click to calculate folder size"
-                      : undefined
+                {visibleCols.map((colId) => {
+                  if (colId === "name") {
+                    return (
+                      <div key="name" className="row-name-cell">
+                        {entry.isDir ? (
+                          <button
+                            className="icon-btn"
+                            style={{ width: 16, height: 16, padding: 0, marginRight: 2 }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => toggleExpand(entry.path, e)}
+                            title={isExpanded ? "Collapse folder" : "Expand folder inline"}
+                          >
+                            {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                          </button>
+                        ) : (
+                          <span style={{ width: 16, display: "inline-block", marginRight: 2 }} />
+                        )}
+                        <span className="row-icon">
+                          {isImageExt(entry.ext) ? (
+                            <img src={assetUrl(entry.path)} alt={entry.name} style={{ width: 18, height: 18, objectFit: "cover", borderRadius: 3 }} loading="lazy" />
+                          ) : (
+                            <span className={`file-icon tone-${tone}`}><Icon size={16} strokeWidth={1.7} /></span>
+                          )}
+                        </span>
+                        {renaming === entry.path ? (
+                          <RenameInput name={entry.name} onCommit={(n) => void store.renameTo(entry.path, n)} onCancel={() => store.setRenaming(null)} />
+                        ) : (
+                          <span className="row-name" title={entry.name}>{entry.name}</span>
+                        )}
+                        {gitStatus && gitStatus !== "unmodified" && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "1px 4px",
+                              borderRadius: 3,
+                              marginLeft: 6,
+                              background:
+                                gitStatus === "modified" ? "rgba(234, 179, 8, 0.15)" :
+                                gitStatus === "staged" ? "rgba(6, 182, 212, 0.15)" :
+                                gitStatus === "untracked" ? "rgba(34, 197, 94, 0.15)" :
+                                gitStatus === "conflicted" ? "rgba(239, 68, 68, 0.15)" :
+                                "rgba(255, 255, 255, 0.08)",
+                              color:
+                                gitStatus === "modified" ? "#eab308" :
+                                gitStatus === "staged" ? "#06b6d4" :
+                                gitStatus === "untracked" ? "#22c55e" :
+                                gitStatus === "conflicted" ? "#ef4444" :
+                                "var(--text-faint)",
+                            }}
+                            title={`Git: ${gitStatus}`}
+                          >
+                            {gitStatus === "modified" ? "M" :
+                             gitStatus === "staged" ? "S" :
+                             gitStatus === "untracked" ? "U" :
+                             gitStatus === "conflicted" ? "!" :
+                             "I"}
+                          </span>
+                        )}
+                        {(tagMap.get(entry.path.toLowerCase()) ?? []).map((color, i) => (
+                          <span
+                            key={`${color}-${i}`}
+                            title="Tagged"
+                            style={{ width: 7, height: 7, borderRadius: 4, background: color, marginLeft: 4, flexShrink: 0 }}
+                          />
+                        ))}
+                      </div>
+                    );
                   }
-                  style={entry.isDir ? { cursor: "pointer" } : undefined}
-                >
-                  {entry.isDir ? (
-                    (store.folderSizes[entry.path] ?? store.folderSizes[normalizePath(entry.path)] ?? store.folderSizes[normalizePath(entry.path).toLowerCase()]) ? (
-                      formatBytes((store.folderSizes[entry.path] ?? store.folderSizes[normalizePath(entry.path)] ?? store.folderSizes[normalizePath(entry.path).toLowerCase()]).size)
-                    ) : (store.folderSizeTasks[entry.path] ?? store.folderSizeTasks[normalizePath(entry.path)] ?? store.folderSizeTasks[normalizePath(entry.path).toLowerCase()]) ? (
-                      <span style={{ color: "var(--accent)", fontStyle: "italic", fontSize: 11 }}>…</span>
-                    ) : (
-                      <span style={{ color: "var(--text-faint)" }}>—</span>
-                    )
-                  ) : (
-                    formatBytes(entry.size)
-                  )}
-                </div>
+                  if (colId === "modified") {
+                    return <div key="modified" className="row-col row-col-modified">{formatDate(entry.modifiedMs)}</div>;
+                  }
+                  if (colId === "created") {
+                    return <div key="created" className="row-col row-col-created" style={{ color: "var(--text-faint)" }}>{formatDate(entry.createdMs)}</div>;
+                  }
+                  if (colId === "type") {
+                    return <div key="type" className="row-col row-col-type">{entry.isDir ? "Folder" : (entry.ext.toUpperCase() || "File")}</div>;
+                  }
+                  if (colId === "ext") {
+                    return <div key="ext" className="row-col row-col-ext" style={{ color: "var(--text-faint)" }}>{entry.isDir ? "" : (entry.ext ? `.${entry.ext}` : "")}</div>;
+                  }
+                  if (colId === "size") {
+                    const sizeObj = entry.isDir
+                      ? (store.folderSizes[entry.path] ?? store.folderSizes[normalizePath(entry.path)] ?? store.folderSizes[normalizePath(entry.path).toLowerCase()])
+                      : null;
+                    const isTaskActive = entry.isDir && Boolean(
+                      store.folderSizeTasks[entry.path] ?? store.folderSizeTasks[normalizePath(entry.path)] ?? store.folderSizeTasks[normalizePath(entry.path).toLowerCase()]
+                    );
+                    const entrySize = entry.isDir ? (sizeObj?.size ?? 0) : entry.size;
+
+                    return (
+                      <div
+                        key="size"
+                        className="row-col row-col-size"
+                        onClick={(e) => {
+                          if (entry.isDir) {
+                            e.stopPropagation();
+                            void store.calculateFolderSize(entry.path);
+                          }
+                        }}
+                        title={
+                          entry.isDir
+                            ? sizeObj
+                              ? `${sizeObj.files.toLocaleString()} files, ${sizeObj.folders.toLocaleString()} folders (Click to recalculate)`
+                              : isTaskActive
+                                ? "Calculating folder size…"
+                                : "Click to calculate folder size"
+                            : undefined
+                        }
+                        style={{ cursor: entry.isDir ? "pointer" : "default", position: "relative" }}
+                      >
+                        {/* Subtle Relative Proportional Indicator */}
+                        {maxFolderSize > 0 && entrySize > 0 && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 2,
+                              bottom: 2,
+                              right: 0,
+                              width: `${Math.min(100, (entrySize / maxFolderSize) * 100)}%`,
+                              background: entry.isDir
+                                ? "linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.12))"
+                                : "linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.10))",
+                              borderRadius: 3,
+                              pointerEvents: "none",
+                            }}
+                          />
+                        )}
+                        {entry.isDir ? (
+                          sizeObj ? (
+                            <span style={{ position: "relative", zIndex: 1, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                              {formatBytes(sizeObj.size)}
+                              {isTaskActive && <span style={{ color: "var(--accent)", fontSize: 10 }}>⚡</span>}
+                            </span>
+                          ) : isTaskActive ? (
+                            <span style={{ position: "relative", zIndex: 1, color: "var(--accent)", fontStyle: "italic", fontSize: 11 }}>
+                              Computing…
+                            </span>
+                          ) : (
+                            <span style={{ position: "relative", zIndex: 1, color: "var(--text-faint)" }}>—</span>
+                          )
+                        ) : (
+                          <span style={{ position: "relative", zIndex: 1 }}>{formatBytes(entry.size)}</span>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+                <div style={{ width: 24 }} />
               </div>
             );
           })}
         </div>
       </div>
+      {marquee.renderMarquee()}
     </div>
   );
 }
 
-function RenameInput({ name, onCommit, onCancel }: { name: string; onCommit: (v: string) => void; onCancel: () => void }) {
-  const [v, setV] = useState(name);
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); const i = name.lastIndexOf("."); if (i > 0) ref.current?.setSelectionRange(0, i); else ref.current?.select(); }, [name]);
-  return (
-    <input
-      ref={ref}
-      className="rename-input"
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onKeyDown={(e) => { if (e.key === "Enter") onCommit(v); if (e.key === "Escape") onCancel(); }}
-      onBlur={() => onCommit(v)}
-    />
-  );
-}

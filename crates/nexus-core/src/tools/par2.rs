@@ -142,8 +142,10 @@ pub fn inspect_par2_file(path_str: &str) -> Par2ValidationReport {
 
         // Read packet length (u64 little-endian at offset+8)
         let packet_len = u64::from_le_bytes(content[offset + 8..offset + 16].try_into().unwrap_or([0; 8]));
-        if packet_len < 64 || (offset as u64 + packet_len) > content.len() as u64 {
-            break;
+        if packet_len < 64 || (offset as u64 + packet_len) > content.len() as u64 || packet_len % 4 != 0 {
+            // Damaged/corrupted packet length: advance past this magic and scan for next valid packet
+            offset += 8;
+            continue;
         }
 
         let pkt_len_usize = packet_len as usize;
@@ -246,5 +248,35 @@ mod tests {
         assert_eq!(report.packets.len(), 1);
         assert_eq!(report.packets[0].packet_type, "Main Packet");
         assert_eq!(report.recovery_set_id, "ABABABABABABABABABABABABABABABAB");
+    }
+
+    #[test]
+    fn test_par2_recovers_from_corrupted_packet() {
+        let mut buf = Vec::new();
+        // 1. Damaged packet with invalid packet length (e.g. 5 bytes)
+        buf.extend_from_slice(PAR2_MAGIC);
+        buf.extend_from_slice(&5u64.to_le_bytes()); // Corrupted packet len < 64
+        buf.extend_from_slice(&[0xFFu8; 16]);
+
+        // 2. Subsequent valid Main Packet
+        buf.extend_from_slice(PAR2_MAGIC);
+        buf.extend_from_slice(&80u64.to_le_bytes()); // valid len 80
+        buf.extend_from_slice(&[0u8; 16]); // md5
+        buf.extend_from_slice(b"PAR 2.0\x00Main\x00\x00\x00\x00");
+        buf.extend_from_slice(&[0xCDu8; 16]); // set ID
+        buf.extend_from_slice(&4096u64.to_le_bytes()); // slice size
+        buf.extend_from_slice(&5u32.to_le_bytes()); // data slices
+        buf.extend_from_slice(&[0u8; 4]);
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("corrupted.par2");
+        std::fs::write(&file, &buf).unwrap();
+
+        let report = inspect_par2_file(&file.to_string_lossy());
+        assert!(report.is_valid, "Should recover and parse the subsequent valid packet");
+        assert_eq!(report.slice_size, 4096);
+        assert_eq!(report.total_data_slices, 5);
+        assert_eq!(report.packets.len(), 1);
+        assert_eq!(report.recovery_set_id, "CDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCD");
     }
 }

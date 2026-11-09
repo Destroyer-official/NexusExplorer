@@ -38,6 +38,16 @@ pub struct DevDriveReport {
     pub recommended_actions: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageCacheMigrationResult {
+    pub ecosystem: String,
+    pub source_path: String,
+    pub target_path: String,
+    pub junction_created: bool,
+    pub message: String,
+}
+
 pub fn detect_dev_drives() -> Vec<DevDriveVolume> {
     let mut volumes = Vec::new();
 
@@ -192,6 +202,91 @@ pub fn generate_dev_drive_report() -> DevDriveReport {
     }
 }
 
+pub fn migrate_package_cache(ecosystem: &str, target_drive: &str) -> Result<PackageCacheMigrationResult, String> {
+    let dev_drives = detect_dev_drives();
+    let caches = audit_package_caches(&dev_drives);
+    let cache = caches
+        .iter()
+        .find(|c| c.ecosystem.eq_ignore_ascii_case(ecosystem) || c.ecosystem.to_lowercase().contains(&ecosystem.to_lowercase()))
+        .ok_or_else(|| format!("Unknown package ecosystem: {ecosystem}"))?;
+
+    let clean_drive = target_drive.trim_end_matches(['\\', '/']);
+    let folder_name = match ecosystem.to_lowercase().as_str() {
+        e if e.contains("cargo") => "CargoHome",
+        e if e.contains("npm") => "npmCache",
+        e if e.contains("pip") || e.contains("uv") => "pipCache",
+        e if e.contains("nuget") => "NuGetPackages",
+        e if e.contains("gradle") => "GradleHome",
+        e if e.contains("maven") => "MavenRepo",
+        e if e.contains("bun") => "BunInstall",
+        _ => "PackageCache",
+    };
+
+    let target_dir = PathBuf::from(format!("{clean_drive}\\packages\\{folder_name}"));
+    if let Err(e) = std::fs::create_dir_all(&target_dir) {
+        return Err(format!("Failed to create destination folder {}: {e}", target_dir.display()));
+    }
+
+    let source_dir = PathBuf::from(&cache.current_path);
+
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+
+        let is_symlink_or_junction = source_dir
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+
+        if !is_symlink_or_junction {
+            if source_dir.exists() {
+                let backup_dir = source_dir.with_extension("bak_devdrive");
+                let _ = std::fs::rename(&source_dir, &backup_dir);
+            }
+            if let Some(parent) = source_dir.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let output = Command::new("cmd")
+                .args(["/C", "mklink", "/J", &source_dir.to_string_lossy(), &target_dir.to_string_lossy()])
+                .output();
+
+            match output {
+                Ok(out) if out.status.success() => Ok(PackageCacheMigrationResult {
+                    ecosystem: cache.ecosystem.clone(),
+                    source_path: cache.current_path.clone(),
+                    target_path: target_dir.to_string_lossy().to_string(),
+                    junction_created: true,
+                    message: format!("Successfully created NTFS junction {} -> {}", source_dir.display(), target_dir.display()),
+                }),
+                Ok(out) => {
+                    let err_msg = String::from_utf8_lossy(&out.stderr);
+                    Err(format!("mklink /J failed: {err_msg}"))
+                }
+                Err(e) => Err(format!("Failed to execute mklink: {e}")),
+            }
+        } else {
+            Ok(PackageCacheMigrationResult {
+                ecosystem: cache.ecosystem.clone(),
+                source_path: cache.current_path.clone(),
+                target_path: target_dir.to_string_lossy().to_string(),
+                junction_created: true,
+                message: format!("{} is already linked to Dev Drive.", source_dir.display()),
+            })
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        Ok(PackageCacheMigrationResult {
+            ecosystem: cache.ecosystem.clone(),
+            source_path: cache.current_path.clone(),
+            target_path: target_dir.to_string_lossy().to_string(),
+            junction_created: false,
+            message: "Dev Drive CoW migration is only applicable on Windows ReFS volumes.".to_string(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +313,13 @@ mod tests {
         if !caches[0].is_on_dev_drive {
             assert!(caches[0].recommended_path.as_ref().unwrap().starts_with("D:\\packages\\"));
         }
+    }
+
+    #[test]
+    fn test_migrate_package_cache_validation() {
+        let res = migrate_package_cache("NonExistentEcosystem", "D:");
+        assert!(res.is_err());
+        assert!(res.err().unwrap().contains("Unknown package ecosystem"));
     }
 }
 

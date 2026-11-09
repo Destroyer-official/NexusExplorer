@@ -34,6 +34,16 @@ pub enum JobEvent {
         speed_bps: f64,
         eta_secs: f64,
         current_file: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        acceleration_mode: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        iops: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        active_workers: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        buffer_size_mb: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hash_algorithm: Option<String>,
     },
     FileDone { job_id: String, path: String, ok: bool, error: Option<String> },
     Conflict {

@@ -128,7 +128,15 @@ describe("entryMenu", () => {
     expect(labels).toContain("Instant CoW Duplicate (Block Clone)");
     expect(labels).toContain("Git: Stage File");
     expect(labels).toContain("Git: View File History & Blame");
+    expect(labels).toContain("Previous versions (VSS Snapshots)...");
+    expect(labels).toContain("Hash & Copy SHA-256");
+    expect(labels).toContain("Verify Hash with Clipboard...");
     expect(labels).toContain("Properties");
+
+    const vssItem = menu.find((m) => m.label === "Previous versions (VSS Snapshots)...");
+    expect(vssItem?.action).toBeDefined();
+    vssItem?.action?.();
+    expect(store.setTimeMachineOpen).toHaveBeenCalledWith(true);
   });
 
   it("handles multi-selection menu correctly", () => {
@@ -139,6 +147,19 @@ describe("entryMenu", () => {
     expect(labels).toContain("Open 2 items");
     expect(labels).toContain("Delete 2 items");
     expect(labels).toContain("Compare Files (Binary Diff)");
+    expect(labels).toContain("New folder with selection (2 items)...");
+    expect(labels).toContain("Copy path");
+    expect(labels).toContain("Copy filename");
+
+    const newFolderItem = menu.find((m) => m.label === "New folder with selection (2 items)...");
+    expect(newFolderItem?.action).toBeDefined();
+    newFolderItem?.action?.();
+    expect(store.openPrompt).toHaveBeenCalledTimes(1);
+
+    const copyFilenameItem = menu.find((m) => m.label === "Copy filename");
+    expect(copyFilenameItem?.action).toBeDefined();
+    copyFilenameItem?.action?.();
+    expect(store.copyText).toHaveBeenCalledWith("app.ts\nmain.rs", "Name copied");
   });
 
   it("detects archive files and adds archive actions", () => {
@@ -181,6 +202,9 @@ describe("backgroundMenu", () => {
     expect(labels).toContain("Visual Time Machine Snapshot Slider...");
     expect(labels).toContain("Smart folders...");
     expect(labels).toContain("Flat branch view");
+    expect(labels).toContain("Select by pattern...");
+    expect(labels).toContain("Invert selection");
+    expect(labels).toContain("Go to folder...");
   });
 });
 

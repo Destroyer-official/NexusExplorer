@@ -6,13 +6,21 @@
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
   --shadow-md: 0 8px 24px rgba(0,0,0,0.35);
   --shadow-lg: 0 20px 50px rgba(0,0,0,0.5);
+  --accent: #7c6cff;
+  --accent-soft: #a594ff;
+  --accent-glow: rgba(124, 108, 255, 0.40);
+  --accent-subtle: rgba(124, 108, 255, 0.14);
+  --selection: rgba(124, 108, 255, 0.22);
+  --selection-border: rgba(124, 108, 255, 0.55);
   --focus: 0 0 0 2px var(--accent-glow);
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", "JetBrains Mono", monospace;
-  --title-h: 38px;
-  --tab-h: 40px;
+  --title-h: 40px;
+  --tab-h: 34px;
   --toolbar-h: 52px;
   --status-h: 28px;
+  --glass-blur: 32px;
+  --glass-opacity: 0.85;
 }
 
 [data-theme="dark"] {
@@ -101,6 +109,150 @@
   --drop: rgba(34,211,238,0.30);
   backdrop-filter: blur(24px) saturate(190%);
   -webkit-backdrop-filter: blur(24px) saturate(190%);
+}
+
+[data-theme="oled"] {
+  --bg: #000000;
+  --bg-2: #0a0a0c;
+  --surface: #121216;
+  --surface-2: #1a1a20;
+  --surface-3: #26262e;
+  --border: #232328;
+  --border-strong: #3b3b44;
+  --text: #fafafa;
+  --text-dim: #a1a1aa;
+  --text-faint: #71717a;
+  --text-on-accent: #ffffff;
+  --danger: #f87171;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --hover: rgba(255,255,255,0.06);
+}
+
+[data-theme="catppuccin"] {
+  --bg: #1e1e2e;
+  --bg-2: #181825;
+  --surface: #313244;
+  --surface-2: #45475a;
+  --surface-3: #585b70;
+  --border: #313244;
+  --border-strong: #585b70;
+  --text: #cdd6f4;
+  --text-dim: #a6adc8;
+  --text-faint: #6c7086;
+  --text-on-accent: #11111b;
+  --danger: #f38ba8;
+  --success: #a6e3a1;
+  --warning: #f9e2af;
+  --hover: rgba(255,255,255,0.06);
+}
+
+[data-theme="dracula"] {
+  --bg: #282a36;
+  --bg-2: #21222c;
+  --surface: #44475a;
+  --surface-2: #6272a4;
+  --surface-3: #7284b8;
+  --border: #44475a;
+  --border-strong: #6272a4;
+  --text: #f8f8f2;
+  --text-dim: #bd93f9;
+  --text-faint: #6272a4;
+  --text-on-accent: #282a36;
+  --danger: #ff5555;
+  --success: #50fa7b;
+  --warning: #f1fa8c;
+  --hover: rgba(255,255,255,0.07);
+}
+
+[data-theme="nord"] {
+  --bg: #2e3440;
+  --bg-2: #242933;
+  --surface: #3b4252;
+  --surface-2: #434c5e;
+  --surface-3: #4c566a;
+  --border: #434c5e;
+  --border-strong: #4c566a;
+  --text: #eceff4;
+  --text-dim: #d8dee9;
+  --text-faint: #9aa3b2;
+  --text-on-accent: #2e3440;
+  --danger: #bf616a;
+  --success: #a3be8c;
+  --warning: #ebcb8b;
+  --hover: rgba(255,255,255,0.06);
+}
+
+[data-theme="tokyo-night"] {
+  --bg: #1a1b26;
+  --bg-2: #16161e;
+  --surface: #24283b;
+  --surface-2: #2f354f;
+  --surface-3: #414868;
+  --border: #2f354f;
+  --border-strong: #414868;
+  --text: #c0caf5;
+  --text-dim: #9aa5ce;
+  --text-faint: #565f89;
+  --text-on-accent: #1a1b26;
+  --danger: #f7768e;
+  --success: #9ece6a;
+  --warning: #e0af68;
+  --hover: rgba(255,255,255,0.06);
+}
+
+[data-theme="cyberpunk"] {
+  --bg: #0d091a;
+  --bg-2: #150f28;
+  --surface: #22173d;
+  --surface-2: #32225a;
+  --surface-3: #452f7a;
+  --border: #3e286e;
+  --border-strong: #ff007f;
+  --text: #fce7f3;
+  --text-dim: #f472b6;
+  --text-faint: #9d174d;
+  --text-on-accent: #ffffff;
+  --danger: #ff0055;
+  --success: #00ff9f;
+  --warning: #ffe600;
+  --hover: rgba(255,0,128,0.12);
+}
+
+[data-theme="rose-pine"] {
+  --bg: #191724;
+  --bg-2: #1f1d2e;
+  --surface: #26233a;
+  --surface-2: #312e4b;
+  --surface-3: #3e3b5e;
+  --border: #312e4b;
+  --border-strong: #524f67;
+  --text: #e0def4;
+  --text-dim: #908caa;
+  --text-faint: #6e6a86;
+  --text-on-accent: #191724;
+  --danger: #eb6f92;
+  --success: #9ccfd8;
+  --warning: #f6c177;
+  --hover: rgba(255,255,255,0.06);
+}
+
+[data-theme="forest"] {
+  --bg: #0c1915;
+  --bg-2: #12241f;
+  --surface: #1a352d;
+  --surface-2: #24473d;
+  --surface-3: #305e51;
+  --border: #24473d;
+  --border-strong: #305e51;
+  --text: #ecfdf5;
+  --text-dim: #a7f3d0;
+  --text-faint: #6ee7b7;
+  --text-on-accent: #0c1915;
+  --danger: #f87171;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --hover: rgba(255,255,255,0.06);
 }
 
 [data-density="compact"] { --row-h: 26px; --tile-h: 76px; }

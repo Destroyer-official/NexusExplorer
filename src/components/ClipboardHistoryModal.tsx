@@ -74,7 +74,7 @@ export function ClipboardHistoryModal({ isOpen, onClose }: Props) {
   return (
     <div className="palette-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
       <div
-        className="palette"
+        className="palette" role="dialog" aria-modal="true" aria-label="Clipboard history"
         onClick={(e) => e.stopPropagation()}
         style={{ width: 680, maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
@@ -89,7 +89,7 @@ export function ClipboardHistoryModal({ isOpen, onClose }: Props) {
               <div style={{ fontSize: 12, color: "var(--text-dim)" }}>4 independent staging slots for concurrent copy/cut workflows</div>
             </div>
           </div>
-          <button className="icon-btn" onClick={onClose}>
+          <button className="icon-btn" aria-label="Close clipboard history" onClick={onClose}>
             <X size={16} />
           </button>
         </div>

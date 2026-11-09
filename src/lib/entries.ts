@@ -2,8 +2,13 @@
 
 import type { FileEntry, Settings, SortKey, Tab } from "@/types";
 
-export function visibleEntries(tab: Tab, settings: Pick<Settings, "showHidden" | "showSystem">): FileEntry[] {
+export function visibleEntries(
+  tab: Tab,
+  settings: Pick<Settings, "showHidden" | "showSystem">,
+  folderSizes?: Record<string, { size: number }>,
+): FileEntry[] {
   const rows = tab.entries.filter((entry) => {
+    if (tab.quickFilter && !entry.name.toLocaleLowerCase().includes(tab.quickFilter.toLocaleLowerCase())) return false;
     if (!settings.showHidden && entry.isHidden) return false;
     if (!settings.showSystem && entry.isSystem) return false;
     return true;
@@ -13,19 +18,32 @@ export function visibleEntries(tab: Tab, settings: Pick<Settings, "showHidden" |
 
   return rows.sort((a, b) => {
     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-    const result = compare(a, b, tab.sortKey as SortKey, collator);
+    const result = compare(a, b, tab.sortKey as SortKey, collator, folderSizes);
     return result === 0 ? collator.compare(a.name, b.name) * direction : result * direction;
   });
 }
 
-function compare(a: FileEntry, b: FileEntry, key: SortKey, collator: Intl.Collator): number {
+function compare(
+  a: FileEntry,
+  b: FileEntry,
+  key: SortKey,
+  collator: Intl.Collator,
+  folderSizes?: Record<string, { size: number }>,
+): number {
   switch (key) {
     case "modified":
       return a.modifiedMs - b.modifiedMs;
     case "created":
       return a.createdMs - b.createdMs;
-    case "size":
-      return a.size - b.size;
+    case "size": {
+      const aSize = a.isDir
+        ? (folderSizes?.[a.path]?.size ?? folderSizes?.[a.path.toLowerCase()]?.size ?? a.size)
+        : a.size;
+      const bSize = b.isDir
+        ? (folderSizes?.[b.path]?.size ?? folderSizes?.[b.path.toLowerCase()]?.size ?? b.size)
+        : b.size;
+      return aSize - bSize;
+    }
     case "type":
       return collator.compare(a.isDir ? "" : a.ext, b.isDir ? "" : b.ext);
     case "name":

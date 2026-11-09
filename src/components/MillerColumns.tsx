@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { ipc, toErrorMessage } from "@/lib/ipc";
 import { formatBytes } from "@/lib/format";
 import { iconForEntry } from "@/lib/fileIcons";
 import { entryMenu } from "@/lib/menus";
+import { beginDrag } from "@/lib/dnd";
 import { useAppStore } from "@/state/store";
 import type { FileEntry } from "@/types";
 
@@ -12,6 +13,7 @@ interface Column {
   entries: FileEntry[];
   selectedPath: string | null;
   loading: boolean;
+  error?: string;
 }
 
 export function MillerColumns() {
@@ -40,7 +42,7 @@ export function MillerColumns() {
           ]);
           setActiveColIndex(0);
         }
-      } catch {}
+      } catch (cause) { if (!cancelled) setColumns([{ path: rootPath, entries: [], selectedPath: null, loading: false, error: toErrorMessage(cause) }]); }
     };
     void loadRoot();
     return () => {
@@ -70,16 +72,16 @@ export function MillerColumns() {
         const childEntries = await ipc.readDir(entry.path);
         setColumns((prev) => {
           const updated = [...prev];
-          if (updated[colIndex + 1]) {
+          if (updated[colIndex + 1]?.path === entry.path) {
             updated[colIndex + 1].entries = childEntries;
             updated[colIndex + 1].loading = false;
           }
           return updated;
         });
-      } catch {
+      } catch (cause) {
         setColumns((prev) => {
           const updated = [...prev];
-          if (updated[colIndex + 1]) updated[colIndex + 1].loading = false;
+          if (updated[colIndex + 1]?.path === entry.path) updated[colIndex + 1] = { ...updated[colIndex + 1], loading: false, error: toErrorMessage(cause) };
           return updated;
         });
       }
@@ -100,9 +102,11 @@ export function MillerColumns() {
   // Keyboard navigation across cascading columns
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || target?.closest("input, textarea, select, button, [contenteditable=true]") || document.querySelector(".overlay, .palette-overlay, .modal-backdrop, [aria-modal=true]")) return;
       if (!columns[activeColIndex]) return;
       const currentCol = columns[activeColIndex];
-      const entries = currentCol.entries;
+      const entries = currentCol.entries.filter((entry) => (store.settings.showHidden || !entry.isHidden) && (store.settings.showSystem || !entry.isSystem) && (!activeTab?.quickFilter || entry.name.toLocaleLowerCase().includes(activeTab.quickFilter.toLocaleLowerCase())));
       const currentSelectedIdx = entries.findIndex((en) => en.path === currentCol.selectedPath);
 
       if (e.key === "ArrowDown") {
@@ -126,6 +130,7 @@ export function MillerColumns() {
           setActiveColIndex(activeColIndex - 1);
         }
       } else if (e.key === "Enter") {
+        e.preventDefault();
         if (currentSelectedIdx >= 0 && entries[currentSelectedIdx]) {
           const entry = entries[currentSelectedIdx];
           if (entry.isDir) void store.navigateTo(entry.path);
@@ -188,17 +193,24 @@ export function MillerColumns() {
               <div style={{ padding: 16, fontSize: 12, color: "var(--text-faint)", textAlign: "center" }}>
                 Loading...
               </div>
-            ) : col.entries.length === 0 ? (
+            ) : col.error ? (<div role="alert" style={{ padding: 16, color: "var(--danger)" }}>{col.error}</div>) : col.entries.length === 0 ? (
               <div style={{ padding: 16, fontSize: 12, color: "var(--text-faint)", textAlign: "center" }}>
                 Empty Folder
               </div>
             ) : (
-              col.entries.map((entry) => {
+              col.entries.filter((entry) => (store.settings.showHidden || !entry.isHidden) && (store.settings.showSystem || !entry.isSystem) && (!activeTab?.quickFilter || entry.name.toLocaleLowerCase().includes(activeTab.quickFilter.toLocaleLowerCase()))).map((entry) => {
                 const isSelected = entry.path === col.selectedPath;
                 return (
                   <div
                     key={entry.path}
+                    data-path={entry.path}
                     onClick={() => handleSelect(colIdx, entry)}
+                    onPointerDown={(e) => {
+                      if (e.button === 0) {
+                        store.selectOnly(entry.path);
+                        beginDrag([entry.path], e.clientX, e.clientY);
+                      }
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       store.selectOnly(entry.path);

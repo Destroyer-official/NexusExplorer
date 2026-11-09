@@ -1,4 +1,4 @@
-import { FolderClosed, Lock } from "lucide-react";
+import { FolderClosed, Lock, Search } from "lucide-react";
 import { useAppStore } from "@/state/store";
 import { basename } from "@/lib/paths";
 
@@ -18,16 +18,35 @@ export default function TabStrip() {
   const openTab = useAppStore((s) => s.openTab);
   const toggleLockTab = useAppStore((s) => s.toggleLockTab);
   const setTabColorGroup = useAppStore((s) => s.setTabColorGroup);
+  const renameTab = useAppStore((s) => s.renameTab);
+  const closeOtherTabs = useAppStore((s) => s.closeOtherTabs);
+  const closeTabsToRight = useAppStore((s) => s.closeTabsToRight);
+  const openPrompt = useAppStore((s) => s.openPrompt);
+  const pushToast = useAppStore((s) => s.pushToast);
+  const copyText = useAppStore((s) => s.copyText);
   const openContextMenu = useAppStore((s) => s.openContextMenu);
   const drives = useAppStore((s) => s.drives);
   const knownFolders = useAppStore((s) => s.knownFolders);
 
   return (
     <div className="tabstrip">
-      <div className="tab-list">
+      <div className="tab-list" role="tablist" aria-label="Folders">
         {tabs.map((tab) => (
           <div
             key={tab.id}
+            role="tab" aria-selected={tab.id === activeTabId} tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activateTab(tab.id); }
+              if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                event.preventDefault();
+                const offset = event.key === "ArrowRight" ? 1 : -1;
+                const next = tabs[(tabs.indexOf(tab) + offset + tabs.length) % tabs.length];
+                activateTab(next.id);
+                const sibling = event.currentTarget.parentElement?.children[(tabs.indexOf(tab) + offset + tabs.length) % tabs.length];
+                if (sibling instanceof HTMLElement) sibling.focus();
+              }
+            }}
             className={`tab ${tab.id === activeTabId ? "active" : ""}`}
             style={{
               borderTop: tab.colorGroup ? `3px solid ${COLOR_HEX[tab.colorGroup] || tab.colorGroup}` : undefined,
@@ -40,6 +59,30 @@ export default function TabStrip() {
             onContextMenu={(e) => {
               e.preventDefault();
               openContextMenu(e.clientX, e.clientY, [
+                {
+                  id: "rename-tab",
+                  label: "Rename Tab...",
+                  action: () => {
+                    openPrompt({
+                      title: "Rename Tab",
+                      description: "Enter a custom title for this tab workflow, or leave blank to restore default folder name.",
+                      label: "Tab Name",
+                      value: tab.title || basename(tab.path),
+                      confirmLabel: "Rename",
+                      onConfirm: (newName) => {
+                        renameTab(tab.id, newName);
+                        pushToast("info", "Tab Renamed", newName ? `Renamed to "${newName}"` : "Restored default name");
+                      },
+                    });
+                  },
+                },
+                {
+                  id: "copy-tab-path",
+                  label: "Copy Tab Path",
+                  action: () => {
+                    void copyText(tab.path, "Tab path copied");
+                  },
+                },
                 {
                   id: "toggle-lock",
                   label: tab.isLocked ? "Unlock Tab" : "Lock Tab (Pinned)",
@@ -87,6 +130,18 @@ export default function TabStrip() {
                   disabled: tab.isLocked || tabs.length <= 1,
                   action: () => void closeTab(tab.id),
                 },
+                {
+                  id: "close-others",
+                  label: "Close Other Tabs",
+                  disabled: tabs.length <= 1,
+                  action: () => closeOtherTabs(tab.id),
+                },
+                {
+                  id: "close-right",
+                  label: "Close Tabs to the Right",
+                  disabled: tabs.indexOf(tab) >= tabs.length - 1,
+                  action: () => closeTabsToRight(tab.id),
+                },
               ]);
             }}
           >
@@ -116,12 +171,20 @@ export default function TabStrip() {
       </div>
       <button
         className="tab-add"
+        onClick={() => useAppStore.getState().setTabSearchOpen(true)}
+        title="Search & Switch Open Tabs (Ctrl+Shift+A)"
+        aria-label="Search & Switch Open Tabs"
+      >
+        <Search size={13} />
+      </button>
+      <button
+        className="tab-add"
         onClick={() => {
           const home =
             knownFolders.find((f) => f.id === "home")?.path ??
             drives.find((d) => d.isReady)?.path ??
             "C:\\";
-          void openTab(home, true);
+          void openTab(home, true, false);
         }}
         title="New tab (Ctrl+T)"
       >

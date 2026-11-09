@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useAppStore } from "@/state/store";
-import { basename, dirname } from "@/lib/paths";
+import { basename, dirname, joinPath } from "@/lib/paths";
 import { iconForEntry } from "@/lib/fileIcons";
 import { beginDrag } from "@/lib/dnd";
+import { ipc, toErrorMessage } from "@/lib/ipc";
 import {
   Copy,
   FolderInput,
@@ -16,6 +17,7 @@ import {
   Radio,
   ChevronDown,
   Sparkles,
+  FileCheck,
 } from "lucide-react";
 
 interface StagingShelfWidgetProps {
@@ -74,10 +76,65 @@ export default function StagingShelfWidget({ embedded = false }: StagingShelfWid
     }
   };
 
+  const handleExportManifest = async () => {
+    if (stagedPaths.length === 0) return;
+    try {
+      store.pushToast("info", "Generating Manifest", `Hashing ${stagedPaths.length} staged file(s)...`);
+      const lines: string[] = [
+        `# Nexus Explorer SHA-256 Manifest`,
+        `# Generated: ${new Date().toISOString()}`,
+        `# Entries: ${stagedPaths.length}`,
+        "",
+      ];
+      for (const p of stagedPaths) {
+        try {
+          const res = await ipc.hashFile(p, "sha256");
+          const name = basename(p);
+          lines.push(`${res.digest} *${name}`);
+        } catch {
+          lines.push(`# Failed to hash: ${p}`);
+        }
+      }
+      const content = lines.join("\r\n") + "\r\n";
+      const manifestName = `manifest_${Date.now()}.sha256`;
+      if (dest) {
+        const manifestPath = joinPath(dest, manifestName);
+        try {
+          await ipc.writeTextFile(manifestPath, content);
+        } catch {
+          // If write is unsupported, clipboard fallback still provides data
+        }
+      }
+      await store.copyText(content, "SHA-256 Manifest");
+      store.pushToast("success", "Manifest Exported", `Generated SHA-256 manifest and copied to clipboard`);
+      if (dest) {
+        const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+        if (activeTab) void store.refreshTab(activeTab.id);
+      }
+    } catch (err) {
+      store.pushToast("error", "Manifest Failed", toErrorMessage(err));
+    }
+  };
+
   return (
     <div
       className={`staging-widget ${embedded ? "staging-widget-embedded" : ""}`}
       data-drop-target="staging"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+        const sel = activeTab?.selected ?? [];
+        if (sel.length > 0) {
+          store.addStaged(sel);
+          store.pushToast("success", "Staged", `Added ${sel.length} item(s) to Staging Shelf`);
+        }
+      }}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -425,8 +482,8 @@ export default function StagingShelfWidget({ embedded = false }: StagingShelfWid
                 stagedPaths.length === 0
                   ? undefined
                   : mode === "copy"
-                  ? "linear-gradient(135deg, #2563eb, #1d4ed8)"
-                  : "linear-gradient(135deg, #d97706, #b45309)",
+                    ? "linear-gradient(135deg, #2563eb, #1d4ed8)"
+                    : "linear-gradient(135deg, #d97706, #b45309)",
               color: "#fff",
               fontWeight: 600,
               fontSize: 11,
@@ -487,6 +544,11 @@ export default function StagingShelfWidget({ embedded = false }: StagingShelfWid
                   <Sparkles size={13} style={{ color: "#a78bfa" }} />
                   <span>Paste & Rename with Pattern…</span>
                 </div>
+                <div className="menu-sep" />
+                <div className="menu-item" onClick={() => void handleExportManifest()}>
+                  <FileCheck size={13} style={{ color: "#10b981" }} />
+                  <span>Export SHA-256 Manifest (.sha256)</span>
+                </div>
               </div>
             )}
           </div>
@@ -500,6 +562,52 @@ export default function StagingShelfWidget({ embedded = false }: StagingShelfWid
             style={{ width: 28, height: 28, flexShrink: 0 }}
           >
             <Radio size={13} style={{ color: broadcastOpen ? "var(--accent)" : undefined }} />
+          </button>
+        </div>
+
+        {/* Quick Batch Actions: Copy All, Move All, Manifest, Clear */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4, paddingTop: 2 }}>
+          <div style={{ display: "flex", gap: 3 }}>
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={stagedPaths.length === 0}
+              onClick={() => void store.copyStagedTo(dest)}
+              title={`Copy all staged items to ${dest}`}
+              style={{ fontSize: 10, padding: "2px 6px", display: "inline-flex", alignItems: "center", gap: 3 }}
+            >
+              <Copy size={11} />
+              <span>Copy All</span>
+            </button>
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={stagedPaths.length === 0}
+              onClick={() => void store.moveStagedTo(dest)}
+              title={`Move all staged items to ${dest}`}
+              style={{ fontSize: 10, padding: "2px 6px", display: "inline-flex", alignItems: "center", gap: 3 }}
+            >
+              <FolderInput size={11} />
+              <span>Move All</span>
+            </button>
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={stagedPaths.length === 0}
+              onClick={() => void handleExportManifest()}
+              title="Compute SHA-256 hashes and save manifest (.sha256)"
+              style={{ fontSize: 10, padding: "2px 6px", display: "inline-flex", alignItems: "center", gap: 3 }}
+            >
+              <FileCheck size={11} style={{ color: "#10b981" }} />
+              <span>Manifest</span>
+            </button>
+          </div>
+          <button
+            className="btn btn-sm btn-ghost"
+            disabled={stagedPaths.length === 0}
+            onClick={() => store.clearStaged()}
+            title="Clear Staging Shelf"
+            style={{ fontSize: 10, padding: "2px 6px", display: "inline-flex", alignItems: "center", gap: 3, color: "var(--danger)" }}
+          >
+            <Trash2 size={11} />
+            <span>Clear</span>
           </button>
         </div>
       </div>

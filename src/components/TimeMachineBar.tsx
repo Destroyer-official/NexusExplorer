@@ -61,7 +61,7 @@ export function TimeMachineBar({ isOpen, onClose }: Props) {
   };
 
   return (
-    <div
+    <div className="time-machine-bar" role="region" aria-label="File snapshots"
       style={{
         position: "relative",
         background: "var(--surface)",
@@ -77,9 +77,9 @@ export function TimeMachineBar({ isOpen, onClose }: Props) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Clock size={16} style={{ color: "var(--accent)" }} />
-          <span style={{ fontWeight: 600, fontSize: 13 }}>Visual Time Machine Snapshot Slider</span>
+          <span style={{ fontWeight: 600, fontSize: 13 }}>File snapshots</span>
           <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
-            {isNow ? "● Viewing Live Active Filesystem" : `● Viewing Snapshot: ${currentSnapshot?.creationTime}`}
+            {isNow ? "Current files" : `Selected snapshot: ${currentSnapshot?.creationTime}`}
           </span>
         </div>
 
@@ -90,10 +90,10 @@ export function TimeMachineBar({ isOpen, onClose }: Props) {
               onClick={handleRestore}
               style={{ display: "flex", alignItems: "center", gap: 6, height: 26, fontSize: 11 }}
             >
-              <RotateCcw size={12} /> Restore Folder to This Version
+              <RotateCcw size={12} /> Restore selected file as a copy
             </button>
           )}
-          <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={onClose}>
+          <button className="icon-btn" style={{ width: 22, height: 22 }} aria-label="Close snapshots" onClick={onClose}>
             <X size={14} />
           </button>
         </div>
@@ -103,6 +103,7 @@ export function TimeMachineBar({ isOpen, onClose }: Props) {
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <span style={{ fontSize: 11, color: "var(--text-dim)", width: 60 }}>Older</span>
         <input
+          aria-label="Select snapshot"
           type="range"
           min={0}
           max={snapshots.length}

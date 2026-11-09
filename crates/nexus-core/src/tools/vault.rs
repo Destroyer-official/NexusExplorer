@@ -43,19 +43,63 @@ fn derive_key(password: &str, salt: &[u8; SALT_LEN]) -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
+/// Fills a buffer with cryptographically secure random bytes from the OS CSPRNG.
+pub fn fill_secure_random(buf: &mut [u8]) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        #[link(name = "bcrypt")]
+        extern "system" {
+            fn BCryptGenRandom(
+                h_algorithm: *mut core::ffi::c_void,
+                pb_buffer: *mut u8,
+                cb_buffer: u32,
+                dw_flags: u32,
+            ) -> i32;
+        }
+
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+        let status = unsafe {
+            BCryptGenRandom(
+                core::ptr::null_mut(),
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status >= 0 {
+            return Ok(());
+        }
+
+        #[link(name = "advapi32")]
+        extern "system" {
+            fn SystemFunction036(pb_buffer: *mut u8, dw_len: u32) -> u8;
+        }
+        let ok = unsafe { SystemFunction036(buf.as_mut_ptr(), buf.len() as u32) };
+        if ok != 0 {
+            return Ok(());
+        }
+
+        Err(format!("OS CSPRNG failed: BCryptGenRandom NTSTATUS {status:#X}"))
+    }
+    #[cfg(not(windows))]
+    {
+        use std::io::Read;
+        let mut file = fs::File::open("/dev/urandom")
+            .map_err(|e| format!("cannot open /dev/urandom: {e}"))?;
+        file.read_exact(buf)
+            .map_err(|e| format!("cannot read from /dev/urandom: {e}"))?;
+        Ok(())
+    }
+}
+
 /// Encrypts an arbitrary byte payload using AES-256-GCM.
 pub fn encrypt_bytes(data: &[u8], password: &str, original_filename: Option<&str>, is_dir: bool) -> Result<Vec<u8>, String> {
     let mut salt = [0u8; SALT_LEN];
     let mut nonce_bytes = [0u8; NONCE_LEN];
 
-    // Generate cryptographically secure salt and nonce
-    let mut prng = blake3::Hasher::new();
-    prng.update(uuid::Uuid::new_v4().as_bytes());
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-    prng.update(&now.to_le_bytes());
-    let mut reader = prng.finalize_xof();
-    reader.fill(&mut salt);
-    reader.fill(&mut nonce_bytes);
+    // Generate cryptographically secure salt and nonce using OS CSPRNG
+    fill_secure_random(&mut salt)?;
+    fill_secure_random(&mut nonce_bytes)?;
 
     let key = derive_key(password, &salt);
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("cipher init error: {e}"))?;
@@ -328,5 +372,16 @@ mod tests {
         let dec_res = decrypt_directory(&vault_file, &unpack_dir, pass).unwrap();
         assert!(dec_res.success);
         assert!(unpack_dir.join("README.md").exists() || unpack_dir.join("project_nexus/README.md").exists());
+    }
+
+    #[test]
+    fn test_fill_secure_random() {
+        let mut buf1 = [0u8; 32];
+        let mut buf2 = [0u8; 32];
+        fill_secure_random(&mut buf1).unwrap();
+        fill_secure_random(&mut buf2).unwrap();
+        assert_ne!(buf1, [0u8; 32]);
+        assert_ne!(buf2, [0u8; 32]);
+        assert_ne!(buf1, buf2);
     }
 }

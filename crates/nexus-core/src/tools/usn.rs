@@ -317,6 +317,29 @@ pub fn read_usn_records(
     })
 }
 
+#[cfg(windows)]
+pub fn search_usn_records(
+    volume_path: &str,
+    query: &str,
+    max_results: usize,
+) -> Result<Vec<UsnRecordEntry>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let query_lower = query.to_lowercase();
+    let batch = read_usn_records(volume_path, None, 2000, None)?;
+    let mut matched: Vec<UsnRecordEntry> = batch
+        .records
+        .into_iter()
+        .filter(|rec| rec.file_name.to_lowercase().contains(&query_lower))
+        .collect();
+
+    if max_results > 0 && matched.len() > max_results {
+        matched.truncate(max_results);
+    }
+    Ok(matched)
+}
+
 #[cfg(not(windows))]
 pub fn query_usn_journal(volume_path: &str) -> Result<UsnJournalInfo, String> {
     Err(format!("USN Journal query is only supported on Windows NTFS (target: {volume_path})"))
@@ -332,6 +355,15 @@ pub fn read_usn_records(
     Err(format!("USN Journal read is only supported on Windows NTFS (target: {volume_path})"))
 }
 
+#[cfg(not(windows))]
+pub fn search_usn_records(
+    volume_path: &str,
+    _query: &str,
+    _max_results: usize,
+) -> Result<Vec<UsnRecordEntry>, String> {
+    Err(format!("USN Journal search is only supported on Windows NTFS (target: {volume_path})"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,6 +373,38 @@ mod tests {
         let reasons = parse_usn_reasons(0x00000100 | 0x80000000);
         assert!(reasons.contains(&"FILE_CREATE".to_string()));
         assert!(reasons.contains(&"CLOSE".to_string()));
+    }
+
+    #[test]
+    fn test_search_synthetic_usn() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&123456i64.to_le_bytes());
+        let filename_utf16: Vec<u16> = "nexus_secret_doc.pdf".encode_utf16().collect();
+        let fn_bytes_len = (filename_utf16.len() * 2) as u16;
+        let fn_offset = 60u16;
+        let total_record_len = (fn_offset as usize + fn_bytes_len as usize) as u32;
+
+        buf.extend_from_slice(&total_record_len.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&3001u64.to_le_bytes());
+        buf.extend_from_slice(&4002u64.to_le_bytes());
+        buf.extend_from_slice(&9999i64.to_le_bytes());
+        buf.extend_from_slice(&133000000000000000i64.to_le_bytes());
+        buf.extend_from_slice(&0x00000100u32.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&32u32.to_le_bytes());
+        buf.extend_from_slice(&fn_bytes_len.to_le_bytes());
+        buf.extend_from_slice(&fn_offset.to_le_bytes());
+        for ch in filename_utf16 {
+            buf.extend_from_slice(&ch.to_le_bytes());
+        }
+
+        let (_, records) = parse_usn_buffer(&buf);
+        let matched: Vec<_> = records.into_iter().filter(|r| r.file_name.contains("secret")).collect();
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].file_name, "nexus_secret_doc.pdf");
     }
 
     #[test]

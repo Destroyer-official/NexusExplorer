@@ -14,6 +14,7 @@ uuid = { version = "1", features = ["v4"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tokio = { version = "1.53", features = ["sync", "rt", "time", "fs", "io-util", "macros", "net"] }
 jwalk = "0.8"
+walkdir = "2"
 trash = "5.2"
 dirs = "6"
 sha2 = "0.10"
@@ -38,6 +39,12 @@ windows = { version = "0.62", features = [
   "Win32_System_Threading",
   "Win32_System_SystemInformation",
   "Win32_System_Diagnostics_Debug",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_SystemServices",
 ] }
 
 [dev-dependencies]

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/state/store";
 import { selectionStats, visibleEntries } from "@/lib/entries";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatSpeed } from "@/lib/format";
 import { normalizePath, samePath } from "@/lib/paths";
-import { PieChart } from "lucide-react";
+import { PieChart, Zap } from "lucide-react";
 
 export default function StatusBar() {
   const store = useAppStore();
@@ -14,7 +14,11 @@ export default function StatusBar() {
   const visible = activeTab ? visibleEntries(activeTab, settings) : [];
   const stats = activeTab ? selectionStats(entries, activeTab.selected) : { count: 0, bytes: 0, files: 0, folders: 0 };
   const drive = drives.find((d) => activeTab && samePath(d.path, activeTab.path.split("\\")[0] + "\\")) ?? drives.find((d) => d.isReady);
-  const runningJobs = Object.values(store.transfers).filter((j) => j.state === "running" || j.state === "paused").length;
+  const transferList = Object.values(store.transfers);
+  const runningJobs = transferList.filter((j) => j.state === "running" || j.state === "paused").length;
+  const totalRunningSpeed = transferList
+    .filter((j) => j.state === "running")
+    .reduce((acc, j) => acc + (j.speedBps || 0), 0);
 
   const [showCharts, setShowCharts] = useState(false);
 
@@ -120,25 +124,49 @@ export default function StatusBar() {
                 return s + e.size;
               }, 0),
             )}
-            {visible.some((e) => e.isDir) && (
-              <span
-                style={{
-                  marginLeft: 6,
-                  fontSize: 10,
-                  color: "var(--accent)",
-                  cursor: "pointer",
-                  textDecoration: "underline",
-                }}
-                onClick={() => {
-                  for (const e of visible) {
-                    if (e.isDir) void store.calculateFolderSize(e.path);
-                  }
-                }}
-                title="Calculate sizes for all folders in this folder"
-              >
-                (calc all folders)
-              </span>
-            )}
+            {(() => {
+              const activeCount = Object.keys(store.folderSizeTasks).length;
+              if (activeCount > 0) {
+                return (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 10,
+                      color: "var(--accent)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <span style={{ display: "inline-block", width: 5, height: 5, borderRadius: "50%", background: "var(--accent)" }} />
+                    Sizing {activeCount} folder{activeCount > 1 ? "s" : ""}…
+                  </span>
+                );
+              }
+              if (visible.some((e) => e.isDir)) {
+                return (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 10,
+                      color: "var(--accent)",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      opacity: 0.75,
+                    }}
+                    onClick={() => {
+                      for (const e of visible) {
+                        if (e.isDir) void store.calculateFolderSize(e.path);
+                      }
+                    }}
+                    title="Force refresh folder sizes in this directory"
+                  >
+                    (refresh sizes)
+                  </span>
+                );
+              }
+              return null;
+            })()}
           </span>
         )}
         {activeTab?.error && <span style={{ color: "var(--danger)" }}>Error</span>}
@@ -211,8 +239,28 @@ export default function StatusBar() {
       {store.statusMessage && <span style={{ color: "var(--text-dim)" }}>{store.statusMessage}</span>}
       <div className="status-right">
         {runningJobs > 0 && (
-          <button className="status-chip" style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }} onClick={store.toggleTransfers}>
-            {runningJobs} transfer{runningJobs === 1 ? "" : "s"}
+          <button
+            className="status-chip"
+            style={{
+              background: "rgba(56,189,248,0.12)",
+              border: "1px solid rgba(56,189,248,0.3)",
+              borderRadius: "var(--radius-sm)",
+              color: "#38bdf8",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "2px 8px",
+              fontWeight: 600,
+            }}
+            onClick={store.toggleTransfers}
+            title="Open 2027+ Transfer Monitor"
+          >
+            <Zap size={11} style={{ color: "#38bdf8" }} />
+            <span>
+              {runningJobs} transfer{runningJobs === 1 ? "" : "s"}
+              {totalRunningSpeed > 0 ? ` (${formatSpeed(totalRunningSpeed)})` : ""}
+            </span>
           </button>
         )}
         {store.undoStatus.canUndo && (

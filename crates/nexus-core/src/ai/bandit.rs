@@ -21,6 +21,7 @@ impl ContextVector {
     }
 
     /// Constructs a normalized context vector from directory metadata and runtime environment.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_directory_state(
         depth: usize,
         file_count: usize,
@@ -79,6 +80,12 @@ pub struct ArmModel {
     pub sample_count: usize,
 }
 
+impl Default for ArmModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArmModel {
     pub fn new() -> Self {
         let mut matrix_a = vec![0.0; CONTEXT_DIM * CONTEXT_DIM];
@@ -95,6 +102,7 @@ impl ArmModel {
     }
 
     /// Evaluates the expected reward and UCB exploration bonus for a given context vector.
+    #[allow(clippy::needless_range_loop)]
     pub fn score(&self, x: &[f32; CONTEXT_DIM], alpha: f32) -> (f32, f32) {
         let inv_a = invert_matrix_12(&self.matrix_a);
         
@@ -134,6 +142,7 @@ impl ArmModel {
     }
 
     /// Applies discounted update: A <- gamma*A + (1-gamma)*I + x*x^T, b <- gamma*b + r*x
+    #[allow(clippy::needless_range_loop)]
     pub fn update(&mut self, x: &[f32; CONTEXT_DIM], reward: f32, gamma: f32) {
         self.sample_count += 1;
 
@@ -196,7 +205,7 @@ impl DiscountedLinUCB {
 
     /// Scores a candidate action arm for the given context. Returns (score, expected_reward, ucb_bonus).
     pub fn score_action(&mut self, action: &str, context: &ContextVector) -> (f32, f32, f32) {
-        let arm = self.arms.entry(action.to_string()).or_insert_with(ArmModel::new);
+        let arm = self.arms.entry(action.to_string()).or_default();
         let (expected, ucb) = arm.score(&context.features, self.alpha);
         (expected + ucb, expected, ucb)
     }
@@ -204,13 +213,14 @@ impl DiscountedLinUCB {
     /// Records user feedback for an executed or rejected action arm.
     pub fn record_feedback(&mut self, action: &str, context: &ContextVector, reward: f32) {
         let gamma = self.gamma;
-        let arm = self.arms.entry(action.to_string()).or_insert_with(ArmModel::new);
+        let arm = self.arms.entry(action.to_string()).or_default();
         arm.update(&context.features, reward, gamma);
     }
 }
 
-/// Inverts a symmetric positive-definite 12x12 matrix using Gauss-Jordan elimination with partial pivoting.
-fn invert_matrix_12(src: &[f32]) -> [f32; CONTEXT_DIM * CONTEXT_DIM] {
+    /// Inverts a symmetric positive-definite 12x12 matrix using Gauss-Jordan elimination with partial pivoting.
+    #[allow(clippy::needless_range_loop)]
+    fn invert_matrix_12(src: &[f32]) -> [f32; CONTEXT_DIM * CONTEXT_DIM] {
     let mut augmented = [[0.0f32; CONTEXT_DIM * 2]; CONTEXT_DIM];
 
     for i in 0..CONTEXT_DIM {

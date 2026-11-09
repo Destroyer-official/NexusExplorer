@@ -2,6 +2,7 @@
 
 export function normalizePath(path: string): string {
   if (!path) return "";
+  if (path.startsWith("wpd://")) return path.replace(/\\/g, "/").replace(/\/+$/, "");
   let value = path.replace(/\//g, "\\");
   // Preserve a drive root (`C:\`) and UNC roots while trimming trailing slashes.
   if (/^[a-zA-Z]:\\?$/.test(value)) return value.slice(0, 2) + "\\";
@@ -53,6 +54,18 @@ export interface PathSegment {
 
 /** Splits a path into clickable breadcrumb segments. */
 export function splitPath(path: string): PathSegment[] {
+  if (path.startsWith("wpd://")) {
+    const raw = path.slice("wpd://".length);
+    const parts = raw.split(/[\/\\]/).filter(Boolean);
+    const segments: PathSegment[] = [];
+    let cursor = "wpd:/";
+    for (const part of parts) {
+      cursor = `${cursor}/${part}`;
+      segments.push({ label: part, path: cursor });
+    }
+    return segments;
+  }
+
   const normal = normalizePath(path);
   if (!normal) return [];
 

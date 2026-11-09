@@ -4,7 +4,6 @@ import Sidebar from "@/components/Sidebar";
 import ExplorerView from "@/components/ExplorerView";
 import PreviewPane from "@/components/PreviewPane";
 import SecondaryPane from "@/components/SecondaryPane";
-import StagingShelf from "@/components/StagingShelf";
 import { FaytBar } from "@/components/FaytBar";
 
 export default function Workspace() {
@@ -12,7 +11,6 @@ export default function Workspace() {
   const dualPane = useAppStore((s) => s.dualPane);
   const dualScrollLocked = useAppStore((s) => s.dualScrollLocked);
   const paneLayout = useAppStore((s) => s.paneLayout);
-  const stagingOpen = useAppStore((s) => s.stagingOpen);
 
   const isVertical = paneLayout === "dual-v";
   const isQuad = paneLayout === "quad";
@@ -65,16 +63,16 @@ export default function Workspace() {
             isVertical || !dualPane
               ? "1fr"
               : isQuad
-              ? "1fr 1fr"
-              : isTriple
-              ? "1.2fr 1fr"
-              : "1fr 1fr",
+                ? "1fr 1fr"
+                : isTriple
+                  ? "1.2fr 1fr"
+                  : "1fr 1fr",
           gridTemplateRows:
-            isVertical
+            isVertical || isTriple
               ? "1fr 1fr"
               : isQuad
-              ? "1fr 1fr"
-              : "1fr",
+                ? "1fr 1fr"
+                : "1fr",
           flex: 1,
           minWidth: 0,
           gap: 1,
@@ -82,7 +80,7 @@ export default function Workspace() {
         }}
       >
         <div
-          style={{ minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg)" }}
+          style={{ minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg)", gridRow: isTriple ? "1 / 3" : undefined }}
           onClick={() => useAppStore.getState().setActivePane(0)}
         >
           <ExplorerView />
@@ -91,25 +89,25 @@ export default function Workspace() {
           <div
             style={{ minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg)" }}
           >
-            <SecondaryPane />
+            <SecondaryPane paneId="secondary" />
           </div>
         )}
         {dualPane && (isQuad || isTriple) && (
           <div
             style={{ minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg)" }}
           >
-            <SecondaryPane />
+            <SecondaryPane paneId="tertiary" />
           </div>
         )}
         {dualPane && isQuad && (
           <div
             style={{ minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg)" }}
           >
-            <SecondaryPane />
+            <SecondaryPane paneId="quaternary" />
           </div>
         )}
       </div>
-      {stagingOpen && <StagingShelf />}
+      {/* Unified Right Inspector Pane — single panel housing Preview, Actions, Shelf & Drop, Git, and Details */}
       {previewOpen && <PreviewPane />}
       <FaytBar />
     </div>

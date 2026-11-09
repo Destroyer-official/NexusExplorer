@@ -29,6 +29,8 @@ export function DevDriveModal({ open, onClose }: DevDriveModalProps) {
   const [unlockPassword, setUnlockPassword] = useState("");
   const [unlocking, setUnlocking] = useState(false);
   const [unlockMsg, setUnlockMsg] = useState<string | null>(null);
+  const [migratingEco, setMigratingEco] = useState<string | null>(null);
+  const [migrationMsg, setMigrationMsg] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -64,6 +66,21 @@ export function DevDriveModal({ open, onClose }: DevDriveModalProps) {
       setUnlockMsg(`Failed: ${err}`);
     } finally {
       setUnlocking(false);
+    }
+  };
+
+  const handleMigrate = async (ecosystem: string) => {
+    const targetDrive = report?.devDrivesDetected.find((d) => d.isDevDrive || d.cowSupported)?.driveLetter ?? "D:";
+    setMigratingEco(ecosystem);
+    setMigrationMsg(null);
+    try {
+      const res = await ipc.toolsDevdriveMigrate(ecosystem, targetDrive);
+      setMigrationMsg(`[${ecosystem}] ${res.message}`);
+      loadData();
+    } catch (err) {
+      setMigrationMsg(`[${ecosystem}] Migration failed: ${err}`);
+    } finally {
+      setMigratingEco(null);
     }
   };
 
@@ -270,9 +287,23 @@ export function DevDriveModal({ open, onClose }: DevDriveModalProps) {
                         <span className="text-[10px] text-slate-400 font-mono truncate" title={c.currentPath}>
                           {c.currentPath}
                         </span>
+                        {!c.isOnDevDrive && report.hasDevDrive && (
+                          <button
+                            onClick={() => handleMigrate(c.ecosystem)}
+                            disabled={migratingEco === c.ecosystem}
+                            className="mt-2 px-2 py-1 rounded bg-indigo-600/80 hover:bg-indigo-500 text-white font-medium text-[10px] flex items-center justify-center gap-1 transition disabled:opacity-50"
+                          >
+                            {migratingEco === c.ecosystem ? "Migrating..." : "Migrate via NTFS Junction ⚡"}
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
+                  {migrationMsg && (
+                    <div className="mt-2 p-2 rounded bg-indigo-950/40 border border-indigo-500/30 text-[11px] text-indigo-300 font-mono">
+                      {migrationMsg}
+                    </div>
+                  )}
                 </div>
               )}
 

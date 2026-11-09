@@ -1,3 +1,4 @@
+import { visibleEntries } from "@/lib/entries";
 import { FileList } from "@/components/FileList";
 import { FileGrid } from "@/components/FileGrid";
 import FlatList from "@/components/FlatList";
@@ -7,6 +8,7 @@ import { useAppStore } from "@/state/store";
 
 export default function ExplorerView() {
   const searchOpen = useAppStore((s) => s.search.open);
+  const settings = useAppStore((s) => s.settings);
   const flatView = useAppStore((s) => s.flatView);
   const activeTab = useAppStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
   if (searchOpen) return <SearchResults />;
@@ -32,7 +34,14 @@ export default function ExplorerView() {
     );
   }
   const rows = activeTab.entries;
-  const visible = rows.filter((e) => (useAppStore.getState().settings.showHidden || !e.isHidden) && (useAppStore.getState().settings.showSystem || !e.isSystem));
+  const visible = visibleEntries(activeTab, settings);
+  if (visible.length === 0 && rows.length > 0) return (
+    <div className="viewport"><div className="empty-state">
+      <h3>{activeTab.quickFilter ? "No matching files" : "Files are hidden"}</h3>
+      <p>{activeTab.quickFilter ? "Try another name or clear the folder filter." : "Check hidden and system file settings to show these items."}</p>
+      {activeTab.quickFilter && <button className="btn" onClick={() => useAppStore.getState().setQuickFilter("")}>Clear filter</button>}
+    </div></div>
+  );
   if (visible.length === 0 && rows.length === 0) {
     return (
       <div className="viewport" data-drop-path={activeTab.path}>

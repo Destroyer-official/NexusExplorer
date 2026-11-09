@@ -38,6 +38,18 @@ export default function HexEditorModal({ filePath, onClose }: HexEditorModalProp
     loadChunk(0);
   }, [loadChunk]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   const handleByteChange = (localIndex: number, newByteVal: number) => {
     if (!slice) return;
     const nextMap = new Map(modifiedIndices);

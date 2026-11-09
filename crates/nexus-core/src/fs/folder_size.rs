@@ -30,8 +30,7 @@ pub fn calculate_folder_size(
     let mut size = 0u64;
     let mut last_report = Instant::now();
 
-    for entry in jwalk::WalkDir::new(root)
-        .skip_hidden(false)
+    for entry in walkdir::WalkDir::new(root)
         .into_iter()
         .filter_map(Result::ok)
     {

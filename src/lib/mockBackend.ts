@@ -3,12 +3,18 @@
 import type {
   DriveInfo,
   FileEntry,
+  FileAnnotation,
   KnownFolder,
   RenamePlanItem,
   RenameTransaction,
   SmartFolder,
   SmartFolderResult,
   GitBlameLine,
+  UsbDeviceDetails,
+  UsbLockingProcess,
+  UsbFormatOptions,
+  UsbDiskImageOptions,
+  UsbSurfaceScanBlock,
 } from "@/types";
 
 const MOCK_DRIVES: DriveInfo[] = [
@@ -32,14 +38,125 @@ const MOCK_DRIVES: DriveInfo[] = [
   },
   {
     path: "E:\\",
-    label: "NVMe Backup SSD",
+    label: "Samsung T7 Shield 1TB",
     driveType: "removable",
     filesystem: "exFAT",
-    freeBytes: 1_420_000_000_000,
-    totalBytes: 2_000_000_000_000,
+    freeBytes: 680_000_000_000,
+    totalBytes: 1_000_000_000_000,
     isReady: true,
+    isUsb: true,
+    usbSpeed: "USB 3.2 Gen 2 (10 Gbps)",
+    isDegradedPort: false,
+  },
+  {
+    path: "wpd://Destroyer/Internal storage",
+    label: "Destroyer (Internal storage)",
+    driveType: "portable",
+    filesystem: "MTP",
+    freeBytes: 19_847_356_416,
+    totalBytes: 113_256_693_760,
+    isReady: true,
+    isUsb: true,
+    usbSpeed: "USB MTP (Hi-Speed)",
+    isDegradedPort: false,
+  },
+  {
+    path: "F:\\",
+    label: "SanDisk Ultra 128GB",
+    driveType: "removable",
+    filesystem: "FAT32",
+    freeBytes: 84_000_000_000,
+    totalBytes: 124_000_000_000,
+    isReady: true,
+    isUsb: true,
+    usbSpeed: "USB 2.0 HighSpeed (480 Mbps)",
+    isDegradedPort: true,
   },
 ];
+
+const MOCK_USB_DEVICES: UsbDeviceDetails[] = [
+  {
+    path: "E:\\",
+    label: "Samsung T7 Shield 1TB",
+    driveLetter: "E:",
+    vendor: "Samsung",
+    model: "Portable SSD T7 Shield",
+    serialNumber: "S5TBNX0W819482X",
+    vid: "04e8",
+    pid: "61f5",
+    usbProtocol: "UASP (USB Attached SCSI)",
+    usbSpeed: "USB 3.2 Gen 2 (10 Gbps)",
+    isDegradedPort: false,
+    writeCachePolicy: "better_performance",
+    filesystem: "exFAT",
+    clusterSizeBytes: 131072,
+    freeBytes: 680_000_000_000,
+    totalBytes: 1_000_000_000_000,
+    usedBytes: 320_000_000_000,
+    isRemovable: true,
+    smartHealthScore: 99,
+    temperatureC: 38,
+    smartStatus: "healthy",
+    partitionScheme: "GPT",
+    partitionsCount: 1,
+    sustainedWriteMBps: 840,
+    readMBps: 1050,
+    isLocked: false,
+    lockingProcessesCount: 0,
+  },
+  {
+    path: "F:\\",
+    label: "SanDisk Ultra 128GB",
+    driveLetter: "F:",
+    vendor: "SanDisk",
+    model: "Ultra USB 3.0 Flash Drive",
+    serialNumber: "4C530001230408119253",
+    vid: "0781",
+    pid: "5581",
+    usbProtocol: "BOT (Bulk-Only Transport)",
+    usbSpeed: "USB 2.0 HighSpeed (480 Mbps)",
+    isDegradedPort: true,
+    writeCachePolicy: "quick_removal",
+    filesystem: "FAT32",
+    clusterSizeBytes: 32768,
+    freeBytes: 84_000_000_000,
+    totalBytes: 124_000_000_000,
+    usedBytes: 40_000_000_000,
+    isRemovable: true,
+    smartHealthScore: 92,
+    temperatureC: 44,
+    smartStatus: "healthy",
+    partitionScheme: "MBR",
+    partitionsCount: 1,
+    sustainedWriteMBps: 22,
+    readMBps: 38,
+    isLocked: true,
+    lockingProcessesCount: 2,
+  },
+];
+
+let mockUsbList = [...MOCK_USB_DEVICES];
+let mockUsbLocks: Record<string, UsbLockingProcess[]> = {
+  "F:\\": [
+    {
+      pid: 14820,
+      name: "excel.exe",
+      windowTitle: "Quarterly_Audit_Report.xlsx - Microsoft Excel",
+      lockedPath: "F:\\Quarterly_Audit_Report.xlsx",
+      appType: "GUI Application",
+      isSystem: false,
+    },
+    {
+      pid: 6112,
+      name: "SearchIndexer.exe",
+      windowTitle: "Windows Search Indexer Service",
+      lockedPath: "F:\\",
+      appType: "Windows Service",
+      isSystem: true,
+    },
+  ],
+  "E:\\": [],
+};
 
 const MOCK_KNOWN: KnownFolder[] = [
   { id: "home", label: "Nexus Workspace", path: "D:\\code\\Main_projects\\NexusExplorer" },
@@ -55,6 +172,7 @@ const mockTerminatedPids = new Set<number>();
 const mockAddedEntries: Record<string, FileEntry[]> = {};
 const mockDirMap = new Map<string, FileEntry[]>();
 const mockDeletedSet = new Set<string>();
+const mockNotesMap = new Map<string, FileAnnotation>();
 
 export function getMockEntries(parent: string): FileEntry[] {
   const norm = parent.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
@@ -64,6 +182,77 @@ export function getMockEntries(parent: string): FileEntry[] {
     mockDirMap.set(norm, list);
   }
   return list.filter((e) => !mockDeletedSet.has(e.path.replace(/\//g, "\\").toLowerCase()));
+}
+
+export function calculateMockFolderStats(dirPath: string): { size: number; files: number; folders: number } {
+  const norm = dirPath.replace(/\//g, "\\").replace(/\\+$/, "");
+  const baseName = (norm.split(/[\/\\]/).pop() || "").toLowerCase();
+
+  const knownStats: Record<string, { size: number; files: number; folders: number }> = {
+    "nexus-core": { size: 18_432_000, files: 48, folders: 6 },
+    "nexus-ffi": { size: 6_240_000, files: 18, folders: 3 },
+    "nexus-indexer": { size: 34_120_000, files: 84, folders: 11 },
+    "nexus-protocol": { size: 9_820_000, files: 29, folders: 4 },
+    "crates": { size: 68_615_250, files: 181, folders: 24 },
+    "src": { size: 1_840_000, files: 62, folders: 8 },
+    "src-tauri": { size: 4_250_000, files: 36, folders: 5 },
+    "components": { size: 480_000, files: 32, folders: 2 },
+    "hooks": { size: 64_000, files: 6, folders: 0 },
+    "lib": { size: 240_000, files: 12, folders: 0 },
+    "state": { size: 128_000, files: 4, folders: 0 },
+    "styles": { size: 96_000, files: 5, folders: 0 },
+    "archive": { size: 48_600_000, files: 142, folders: 8 },
+    "target": { size: 1_420_000_000, files: 8420, folders: 412 },
+    "node_modules": { size: 176_400_000, files: 12840, folders: 940 },
+    "dist": { size: 980_000, files: 4, folders: 1 },
+    "public": { size: 240_000, files: 3, folders: 0 },
+    "nexusexplorer": { size: 1_728_000_000, files: 21620, folders: 1398 },
+    "nexus workspace": { size: 1_728_000_000, files: 21620, folders: 1398 },
+    "main_projects": { size: 2_450_000_000, files: 32100, folders: 2100 },
+    "desktop": { size: 3_057_400, files: 5, folders: 1 },
+    "documents": { size: 3_594_500, files: 5, folders: 2 },
+    "downloads": { size: 72_151_200, files: 12, folders: 4 },
+    "pictures": { size: 6_535_000, files: 4, folders: 0 },
+    "music": { size: 51_100_000, files: 3, folders: 0 },
+    "videos": { size: 190_000_000, files: 2, folders: 0 },
+  };
+
+  if (knownStats[baseName]) {
+    return knownStats[baseName];
+  }
+
+  // Calculate from dynamic mock entries
+  const entries = getMockEntries(norm);
+  let totalSize = 0;
+  let totalFiles = 0;
+  let totalFolders = 0;
+
+  for (const entry of entries) {
+    if (entry.isDir) {
+      totalFolders += 1;
+      const subName = entry.name.toLowerCase();
+      if (knownStats[subName]) {
+        totalSize += knownStats[subName].size;
+        totalFiles += knownStats[subName].files;
+        totalFolders += knownStats[subName].folders;
+      } else {
+        totalSize += 131072;
+        totalFiles += 3;
+      }
+    } else {
+      totalFiles += 1;
+      totalSize += entry.size;
+    }
+  }
+
+  if (totalSize === 0 && totalFiles === 0) {
+    const hash = baseName.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    totalFiles = (hash % 15) + 3;
+    totalFolders = (hash % 3) + 1;
+    totalSize = totalFiles * 64000;
+  }
+
+  return { size: totalSize, files: totalFiles, folders: totalFolders };
 }
 
 export function addMockEntryToParent(parent: string, entry: FileEntry) {
@@ -80,7 +269,15 @@ export function addMockEntryToParent(parent: string, entry: FileEntry) {
 
 export function deleteMockPaths(paths: string[]) {
   for (const p of paths) {
-    mockDeletedSet.add(p.replace(/\//g, "\\").toLowerCase());
+    const norm = p.replace(/\//g, "\\").toLowerCase();
+    mockDeletedSet.add(norm);
+    const parent = norm.split(/[\\\/]/).slice(0, -1).join("\\");
+    if (parent) {
+      const list = mockDirMap.get(parent);
+      if (list) {
+        mockDirMap.set(parent, list.filter((e) => e.path.replace(/\//g, "\\").toLowerCase() !== norm));
+      }
+    }
   }
 }
 
@@ -157,204 +354,246 @@ export function generateMockEntries(parent: string): FileEntry[] {
   });
 
   const getBaseEntries = (): FileEntry[] => {
+    if (lower.includes("internal storage") || lower.includes("destroyer")) {
+      return [
+        makeDir("Pictures", 1),
+        makeDir("DCIM", 1),
+        makeDir("Documents", 2),
+        makeDir("Download", 3),
+        makeDir("backup", 4),
+        makeFile("output.txt", 21641, "txt", 1),
+        makeFile("sphincs.py", 18871, "py", 2),
+        makeFile("production_validation_final.py", 14215, "py", 3),
+        makeFile("income.jpg", 282504, "jpg", 1),
+        makeFile("cryptographic_errors.py", 22227, "py", 2),
+      ];
+    }
+
     if (folderName === "crates") {
-    return [
-      makeDir("nexus-core", 1),
-      makeDir("nexus-indexer", 2),
-      makeDir("nexus-protocol", 3),
-      makeDir("nexus-ffi", 4),
-      makeFile("Cargo.toml", 850, "toml", 1),
-      makeFile("README.md", 2400, "md", 2),
-    ];
-  }
+      return [
+        makeDir("nexus-core", 1),
+        makeDir("nexus-indexer", 2),
+        makeDir("nexus-protocol", 3),
+        makeDir("nexus-ffi", 4),
+        makeFile("Cargo.toml", 850, "toml", 1),
+        makeFile("README.md", 2400, "md", 2),
+      ];
+    }
 
-  if (["nexus-core", "nexus-indexer", "nexus-protocol", "nexus-ffi"].includes(folderName)) {
-    return [
-      makeDir("src", 1),
-      makeDir("tests", 3),
-      makeFile("Cargo.toml", 1200, "toml", 1),
-      makeFile("build.rs", 420, "rs", 5),
-      makeFile("README.md", 1850, "md", 2),
-    ];
-  }
+    if (["nexus-core", "nexus-indexer", "nexus-protocol", "nexus-ffi"].includes(folderName)) {
+      return [
+        makeDir("src", 1),
+        makeDir("tests", 3),
+        makeFile("Cargo.toml", 1200, "toml", 1),
+        makeFile("build.rs", 420, "rs", 5),
+        makeFile("README.md", 1850, "md", 2),
+      ];
+    }
 
-  if (folderName === "src" && !lower.includes("crates")) {
-    return [
-      makeDir("components", 1),
-      makeDir("hooks", 2),
-      makeDir("lib", 3),
-      makeDir("state", 1),
-      makeDir("styles", 4),
-      makeDir("types", 5),
-      makeFile("App.tsx", 8400, "tsx", 1),
-      makeFile("main.tsx", 480, "tsx", 2),
-      makeFile("types.ts", 14200, "ts", 3),
-    ];
-  }
+    if (folderName === "src" && !lower.includes("crates")) {
+      return [
+        makeDir("components", 1),
+        makeDir("hooks", 2),
+        makeDir("lib", 3),
+        makeDir("state", 1),
+        makeDir("styles", 4),
+        makeDir("types", 5),
+        makeFile("App.tsx", 8400, "tsx", 1),
+        makeFile("main.tsx", 480, "tsx", 2),
+        makeFile("types.ts", 14200, "ts", 3),
+      ];
+    }
 
-  if (folderName === "components") {
-    return [
-      makeDir("previews", 2),
-      makeDir("modals", 3),
-      makeFile("FileList.tsx", 9800, "tsx", 1),
-      makeFile("FileGrid.tsx", 4200, "tsx", 1),
-      makeFile("Toolbar.tsx", 7600, "tsx", 2),
-      makeFile("Breadcrumbs.tsx", 2300, "tsx", 3),
-      makeFile("Sidebar.tsx", 6100, "tsx", 4),
-      makeFile("PreviewPane.tsx", 8900, "tsx", 2),
-      makeFile("QuickLookDialog.tsx", 2800, "tsx", 1),
-      makeFile("CommandPalette.tsx", 5400, "tsx", 3),
-    ];
-  }
+    if (folderName === "components") {
+      return [
+        makeDir("previews", 2),
+        makeDir("modals", 3),
+        makeFile("FileList.tsx", 9800, "tsx", 1),
+        makeFile("FileGrid.tsx", 4200, "tsx", 1),
+        makeFile("Toolbar.tsx", 7600, "tsx", 2),
+        makeFile("Breadcrumbs.tsx", 2300, "tsx", 3),
+        makeFile("Sidebar.tsx", 6100, "tsx", 4),
+        makeFile("PreviewPane.tsx", 8900, "tsx", 2),
+        makeFile("QuickLookDialog.tsx", 2800, "tsx", 1),
+        makeFile("CommandPalette.tsx", 5400, "tsx", 3),
+      ];
+    }
 
-  if (folderName === "hooks") {
-    return [
-      makeFile("useShortcuts.ts", 3200, "ts", 2),
-      makeFile("useTheme.ts", 1400, "ts", 4),
-      makeFile("useWatcher.ts", 2600, "ts", 3),
-      makeFile("useVirtualScroll.ts", 4100, "ts", 5),
-    ];
-  }
+    if (folderName === "hooks") {
+      return [
+        makeFile("useShortcuts.ts", 3200, "ts", 2),
+        makeFile("useTheme.ts", 1400, "ts", 4),
+        makeFile("useWatcher.ts", 2600, "ts", 3),
+        makeFile("useVirtualScroll.ts", 4100, "ts", 5),
+      ];
+    }
 
-  if (folderName === "lib") {
-    return [
-      makeFile("ipc.ts", 18400, "ts", 1),
-      makeFile("paths.ts", 3600, "ts", 2),
-      makeFile("format.ts", 2200, "ts", 4),
-      makeFile("menus.ts", 5100, "ts", 3),
-      makeFile("dnd.ts", 2900, "ts", 2),
-      makeFile("mockBackend.ts", 24500, "ts", 1),
-    ];
-  }
+    if (folderName === "lib") {
+      return [
+        makeFile("ipc.ts", 18400, "ts", 1),
+        makeFile("paths.ts", 3600, "ts", 2),
+        makeFile("format.ts", 2200, "ts", 4),
+        makeFile("menus.ts", 5100, "ts", 3),
+        makeFile("dnd.ts", 2900, "ts", 2),
+        makeFile("mockBackend.ts", 24500, "ts", 1),
+      ];
+    }
 
-  if (folderName === "state") {
-    return [
-      makeFile("store.ts", 32000, "ts", 1),
-      makeFile("types.ts", 4500, "ts", 2),
-    ];
-  }
+    if (folderName === "state") {
+      return [
+        makeFile("store.ts", 32000, "ts", 1),
+        makeFile("types.ts", 4500, "ts", 2),
+      ];
+    }
 
-  if (folderName === "styles") {
-    return [
-      makeFile("layout.css", 9200, "css", 1),
-      makeFile("theme.css", 4100, "css", 3),
-      makeFile("tokens.css", 2800, "css", 5),
-      makeFile("tailwind.css", 1600, "css", 2),
-    ];
-  }
+    if (folderName === "styles") {
+      return [
+        makeFile("layout.css", 9200, "css", 1),
+        makeFile("theme.css", 4100, "css", 3),
+        makeFile("tokens.css", 2800, "css", 5),
+        makeFile("tailwind.css", 1600, "css", 2),
+      ];
+    }
 
-  if (folderName === "tests") {
-    return [
-      makeFile("explorer.spec.ts", 6400, "ts", 2),
-      makeFile("navigation.test.ts", 4200, "ts", 3),
-      makeFile("ipc.test.ts", 3800, "ts", 4),
-    ];
-  }
+    if (folderName === "tests") {
+      return [
+        makeFile("explorer.spec.ts", 6400, "ts", 2),
+        makeFile("navigation.test.ts", 4200, "ts", 3),
+        makeFile("ipc.test.ts", 3800, "ts", 4),
+      ];
+    }
 
-  if (folderName === "dist") {
-    return [
-      makeDir("assets", 1),
-      makeFile("index.html", 850, "html", 1),
-      makeFile("favicon.ico", 1024, "ico", 1),
-    ];
-  }
+    if (folderName === "dist") {
+      return [
+        makeDir("assets", 1),
+        makeFile("index.html", 850, "html", 1),
+        makeFile("favicon.ico", 1024, "ico", 1),
+      ];
+    }
 
-  if (folderName === "assets") {
-    return [
-      makeFile("index.js", 248000, "js", 1),
-      makeFile("index.css", 42000, "css", 1),
-      makeFile("vendor.js", 685000, "js", 2),
-      makeFile("nexus_logo.svg", 3400, "svg", 3),
-    ];
-  }
+    if (folderName === "assets") {
+      return [
+        makeFile("index.js", 248000, "js", 1),
+        makeFile("index.css", 42000, "css", 1),
+        makeFile("vendor.js", 685000, "js", 2),
+        makeFile("nexus_logo.svg", 3400, "svg", 3),
+      ];
+    }
 
-  if (folderName === "public") {
-    return [
-      makeFile("favicon.ico", 1024, "ico", 24),
-      makeFile("logo.png", 18500, "png", 24),
-      makeFile("robots.txt", 120, "txt", 24),
-    ];
-  }
+    if (folderName === "public") {
+      return [
+        makeFile("favicon.ico", 1024, "ico", 24),
+        makeFile("logo.png", 18500, "png", 24),
+        makeFile("robots.txt", 120, "txt", 24),
+      ];
+    }
 
-  if (folderName === "desktop") {
-    return [
-      makeDir("Project_Alpha", 2),
-      makeFile("Product_Roadmap_2027.pdf", 2450000, "pdf", 1),
-      makeFile("Sprint_Notes.txt", 1400, "txt", 2),
-      makeFile("Financial_Forecast.xlsx", 86000, "xlsx", 4),
-      makeFile("architecture_diagram.png", 520000, "png", 3),
-    ];
-  }
+    if (folderName === "desktop") {
+      return [
+        makeDir("Project_Alpha", 2),
+        makeFile("Product_Roadmap_2027.pdf", 2450000, "pdf", 1),
+        makeFile("Sprint_Notes.txt", 1400, "txt", 2),
+        makeFile("Financial_Forecast.xlsx", 86000, "xlsx", 4),
+        makeFile("architecture_diagram.png", 520000, "png", 3),
+      ];
+    }
 
-  if (folderName === "documents") {
-    return [
-      makeDir("Contracts", 24),
-      makeDir("Tax_2026", 48),
-      makeFile("Annual_Report.pdf", 3100000, "pdf", 5),
-      makeFile("Security_Whitepaper.docx", 480000, "docx", 8),
-      makeFile("API_Specification.md", 14500, "md", 2),
-    ];
-  }
+    if (folderName === "documents") {
+      return [
+        makeDir("Contracts", 24),
+        makeDir("Tax_2026", 48),
+        makeFile("Annual_Report.pdf", 3100000, "pdf", 5),
+        makeFile("Security_Whitepaper.docx", 480000, "docx", 8),
+        makeFile("API_Specification.md", 14500, "md", 2),
+      ];
+    }
 
-  if (folderName === "downloads") {
-    return [
-      makeDir("crates", 1),
-      makeDir("src", 2),
-      makeDir("dist", 3),
-      makeDir("public", 5),
-      makeFile("NexusExplorer_Setup_v2.0.exe", 48500000, "exe", 1),
-      makeFile("architecture_2027.svg", 44000, "svg", 2),
-      makeFile("3d_model_engine.gltf", 245000, "gltf", 3),
-      makeFile("Cargo.toml", 1100, "toml", 1),
-      makeFile("package.json", 1100, "json", 2),
-      makeFile("README.md", 11000, "md", 1),
-      makeFile("release_bundle_v2.zip", 18450000, "zip", 4),
-      makeFile("sample_track.mp3", 4600000, "mp3", 5),
-    ];
-  }
+    if (folderName === "downloads") {
+      return [
+        makeDir("crates", 1),
+        makeDir("src", 2),
+        makeDir("dist", 3),
+        makeDir("public", 5),
+        makeFile("NexusExplorer_Setup_v2.0.exe", 48500000, "exe", 1),
+        makeFile("architecture_2027.svg", 44000, "svg", 2),
+        makeFile("3d_model_engine.gltf", 245000, "gltf", 3),
+        makeFile("Cargo.toml", 1100, "toml", 1),
+        makeFile("package.json", 1100, "json", 2),
+        makeFile("README.md", 11000, "md", 1),
+        makeFile("release_bundle_v2.zip", 18450000, "zip", 4),
+        makeFile("sample_track.mp3", 4600000, "mp3", 5),
+      ];
+    }
 
-  if (folderName === "pictures") {
-    return [
-      makeFile("cyberpunk_neon_city.png", 4200000, "png", 1),
-      makeFile("nexus_ui_mockup.webp", 890000, "webp", 3),
-      makeFile("vector_icons.svg", 45000, "svg", 6),
-      makeFile("system_architecture.png", 1400000, "png", 2),
-    ];
-  }
+    if (folderName === "pictures") {
+      return [
+        makeFile("cyberpunk_neon_city.png", 4200000, "png", 1),
+        makeFile("nexus_ui_mockup.webp", 890000, "webp", 3),
+        makeFile("vector_icons.svg", 45000, "svg", 6),
+        makeFile("system_architecture.png", 1400000, "png", 2),
+      ];
+    }
 
-  if (folderName === "music") {
-    return [
-      makeFile("synthwave_odyssey.flac", 24500000, "flac", 2),
-      makeFile("ambient_focus_flow.mp3", 8400000, "mp3", 4),
-      makeFile("cybernetic_pulse.wav", 18200000, "wav", 8),
-    ];
-  }
+    if (folderName === "music") {
+      return [
+        makeFile("synthwave_odyssey.flac", 24500000, "flac", 2),
+        makeFile("ambient_focus_flow.mp3", 8400000, "mp3", 4),
+        makeFile("cybernetic_pulse.wav", 18200000, "wav", 8),
+      ];
+    }
 
-  if (folderName === "videos") {
-    return [
-      makeFile("nexus_explorer_demo_4k.mp4", 142000000, "mp4", 1),
-      makeFile("vdfs_benchmark_recording.webm", 48000000, "webm", 3),
-    ];
-  }
+    if (folderName === "videos") {
+      return [
+        makeFile("nexus_explorer_demo_4k.mp4", 142000000, "mp4", 1),
+        makeFile("vdfs_benchmark_recording.webm", 48000000, "webm", 3),
+      ];
+    }
 
-  // If this is a root path or unhandled folder
-  if (!norm || norm.endsWith(":") || norm.endsWith(":\\") || norm === "D:" || norm === "C:") {
-    return [
-      makeDir("crates", 1),
-      makeDir("src", 2),
-      makeDir("src-tauri", 3),
-      makeDir("dist", 1),
-      makeDir("public", 24),
-      makeFile("3d_model_engine.gltf", 245000, "gltf", 5),
-      makeFile("architecture_2027.svg", 45000, "svg", 2),
-      makeFile("Cargo.toml", 1100, "toml", 1),
-      makeFile("confidential_keys.nxvault", 3145728, "nxvault", 1),
-      makeFile("package.json", 1100, "json", 1),
-      makeFile("README.md", 11050, "md", 1),
-      makeFile("release_bundle_v2.zip", 18454937, "zip", 12),
-      makeFile("sample_track.mp3", 4613734, "mp3", 10),
-    ];
-  }
+    // Main project workspace
+    if (
+      folderName === "nexusexplorer" ||
+      folderName === "nexus workspace" ||
+      lower.endsWith("main_projects\\nexusexplorer") ||
+      lower.endsWith("main_projects/nexusexplorer")
+    ) {
+      return [
+        makeDir("crates", 1),
+        makeDir("src", 2),
+        makeDir("src-tauri", 3),
+        makeDir("target", 1),
+        makeDir("node_modules", 12),
+        makeDir("dist", 1),
+        makeDir("public", 24),
+        makeDir("archive", 4),
+        makeFile("Cargo.lock", 139566, "lock", 2),
+        makeFile("Cargo.toml", 340, "toml", 1),
+        makeFile("package.json", 1149, "json", 1),
+        makeFile("package-lock.json", 124096, "json", 1),
+        makeFile("README.md", 7498, "md", 1),
+        makeFile("index.html", 490, "html", 3),
+        makeFile("architecture_2027.svg", 45000, "svg", 2),
+        makeFile("release_bundle_v2.zip", 18454937, "zip", 12),
+      ];
+    }
+
+    // If this is a root path or unhandled folder
+    if (!norm || norm.endsWith(":") || norm.endsWith(":\\") || norm === "D:" || norm === "C:") {
+      return [
+        makeDir("crates", 1),
+        makeDir("src", 2),
+        makeDir("src-tauri", 3),
+        makeDir("dist", 1),
+        makeDir("public", 24),
+        makeFile("3d_model_engine.gltf", 245000, "gltf", 5),
+        makeFile("architecture_2027.svg", 45000, "svg", 2),
+        makeFile("Cargo.toml", 1100, "toml", 1),
+        makeFile("confidential_keys.nxvault", 3145728, "nxvault", 1),
+        makeFile("package.json", 1100, "json", 1),
+        makeFile("README.md", 11050, "md", 1),
+        makeFile("release_bundle_v2.zip", 18454937, "zip", 12),
+        makeFile("sample_track.mp3", 4613734, "mp3", 10),
+      ];
+    }
 
     // Generic fallback for any other subfolder
     const hash = folderName.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
@@ -386,11 +625,11 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         if (typeof window !== "undefined" && window.localStorage) {
           stored = window.localStorage.getItem("nexus_settings_browser");
         }
-      } catch {}
+      } catch { }
       if (stored) {
         try {
           return JSON.parse(stored);
-        } catch {}
+        } catch { }
       }
       return {
         version: 1,
@@ -425,7 +664,7 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
           if (typeof window !== "undefined" && window.localStorage) {
             window.localStorage.setItem("nexus_settings_browser", JSON.stringify(args.settings));
           }
-        } catch {}
+        } catch { }
       }
       return args?.settings as unknown as T;
     }
@@ -449,22 +688,12 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         homeDir: "D:\\code\\Main_projects\\NexusExplorer",
       } as unknown as T;
 
-    case "window_minimize":
-    case "window_close":
-      return undefined as unknown as T;
-
-    case "window_toggle_maximize":
-      return true as unknown as T;
-
-    case "window_is_maximized":
-      return false as unknown as T;
-
     case "list_bookmarks": {
       const stored = localStorage.getItem("nexus_bookmarks_browser");
       if (stored) {
         try {
           return JSON.parse(stored);
-        } catch {}
+        } catch { }
       }
       return [
         { id: "b1", name: "Main Project", path: "D:\\code\\Main_projects\\NexusExplorer" },
@@ -674,6 +903,15 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
           "Move Cargo and NPM caches to D: to unlock ReFS block cloning and up to 300% faster package operations.",
         ],
       } as unknown as T;
+
+    case "tools_devdrive_migrate":
+      return {
+        ecosystem: (args?.ecosystem as string) || "Cargo",
+        sourcePath: "C:\\Users\\Developer\\.cargo",
+        targetPath: "D:\\packages\\CargoHome",
+        junctionCreated: true,
+        message: "Successfully created NTFS junction C:\\Users\\Developer\\.cargo -> D:\\packages\\CargoHome",
+      } as unknown as T;
     case "tools_bitlocker_status":
       return [
         {
@@ -799,6 +1037,18 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         elapsedMs: 35,
       } as unknown as T;
 
+    case "tools_janitor_scan_empty":
+      return {
+        rootPath: (args?.root as string) || "D:\\temp",
+        emptyDirs: [
+          "D:\\temp\\old_build\\empty_sub",
+          "D:\\temp\\old_build",
+          "D:\\temp\\unused_logs",
+        ],
+        scannedDirs: 48,
+        elapsedMs: 12,
+      } as unknown as T;
+
     case "tools_dlp_scan":
       return {
         scannedFiles: 42,
@@ -818,35 +1068,484 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         },
       ] as unknown as T;
 
-    case "tools_copilot_plan":
+    case "tools_copilot_plan": {
+      const rawPrompt = String(args?.prompt || "");
+      const p = rawPrompt.toLowerCase();
+      const currentDir = String(args?.currentDir || "D:\\code\\Main_projects\\NexusExplorer");
+      const words = p.split(/\s+/).filter(Boolean);
+
+      // 1. Dynamic Action Classification
+      let actionKind = "move_by_extension";
+      let intentSummary = "Organize files into subfolders by extension";
+      let explanation = "";
+      let isDestructive = false;
+      let confidence = 0.94;
+
+      const isShred = p.includes("shred") || p.includes("wipe") || p.includes("secure delete") || p.includes("erase") || p.includes("purge") || p.includes("destroy");
+      const isDedup = p.includes("dedup") || p.includes("duplicate file") || p.includes("duplicates") || p.includes("find duplicate") || p.includes("locate duplicate") || p.includes("same files") || p.includes("identical files");
+      const isTag = p.includes("tag with") || p.includes("label as") || p.includes("mark with") || p.startsWith("tag ") || p.startsWith("label ");
+      const isSearchWords = Boolean(words[0] && ["find", "search", "show", "locate", "list", "query", "filter", "display", "what", "which", "where", "how"].includes(words[0]));
+      const isLargest = p.includes("largest") || p.includes("biggest") || p.includes("heaviest") || p.includes("most space") || p.includes("takes the most") || p.includes("large folder") || p.includes("large file");
+      const explicitSearch = !isShred && !isDedup && !isTag && (isSearchWords || isLargest);
+
+      if (explicitSearch) {
+        actionKind = "search";
+        intentSummary = isLargest ? "Locate largest item" : "Search and filter files matching criteria";
+        confidence = 0.95;
+      } else if (isShred) {
+        actionKind = "shred";
+        intentSummary = "Cryptographically wipe matched files";
+        isDestructive = true;
+        confidence = 0.96;
+      } else if (isDedup) {
+        actionKind = "deduplicate";
+        intentSummary = "Identify identical content files via hash matching";
+        confidence = 0.93;
+      } else if (isTag) {
+        actionKind = "tag";
+        intentSummary = "Apply metadata tag to matched files";
+        confidence = 0.89;
+      } else if (words.includes("date") || words.includes("dates") || p.includes("by date") || p.includes("date taken") || p.includes("creation date") || p.includes("modified date") || p.includes("year") || p.includes("month") || p.includes("chronological") || p.includes("by modified") || p.includes("by creation")) {
+        actionKind = "organize_by_date";
+        intentSummary = "Organize files into Year/Month subdirectories";
+        confidence = 0.92;
+      } else if (p.includes("clone") || p.includes("cow") || p.includes("reflink") || p.includes("block clone") || p.includes("block cloning") || p.includes("copy on write") || p.includes("duplicate folder") || p.includes("duplicate directory")) {
+        actionKind = "clone_cow";
+        intentSummary = "Fast copy-on-write clone of items";
+        confidence = 0.90;
+      } else if (p.includes("flatten") || p.includes("un-nest") || p.includes("extract all files here") || p.includes("collapse hierarchy") || p.includes("collapse folder hierarchy")) {
+        actionKind = "flatten_directory";
+        intentSummary = "Flatten nested hierarchy into the folder root";
+        confidence = 0.91;
+      } else if (p.includes("zip") || p.includes("compress") || p.includes("archive") || p.includes("bundle") || words.includes("pack") || words.includes("tar") || p.includes(".tar")) {
+        actionKind = "archive_zip";
+        intentSummary = "Compress selected files into a ZIP archive";
+        confidence = 0.95;
+      } else if (p.includes("organize") || p.includes("by extension") || p.includes("by format") || p.includes("by file type") || p.includes("group by type") || p.includes("arrange by format") || p.includes("tidy") || p.includes("categorize files")) {
+        actionKind = "move_by_extension";
+        intentSummary = "Organize files into subfolders by extension";
+        confidence = 0.94;
+      } else {
+        actionKind = "search";
+        intentSummary = "Filter files matching query criteria";
+        confidence = 0.85;
+      }
+
+      // 2. Dynamic Target Extensions & Semantic Categories
+      let targetExtensions: string[] = [];
+      if (p.includes("image") || p.includes("photo") || p.includes("picture")) {
+        targetExtensions.push("png", "jpg", "jpeg", "webp", "svg", "gif");
+      }
+      if (p.includes("video") || p.includes("movie") || p.includes("clip")) {
+        targetExtensions.push("mp4", "mkv", "mov", "avi");
+      }
+      if (p.includes("audio") || p.includes("music") || p.includes("sound")) {
+        targetExtensions.push("mp3", "wav", "flac");
+      }
+      if (p.includes("doc") || p.includes("document") || p.includes("notes") || p.includes("pdf")) {
+        targetExtensions.push("pdf", "docx", "txt", "md", "xlsx");
+      }
+      if (p.includes("markdown")) {
+        targetExtensions = ["md"];
+      }
+      if (p.includes("code") || p.includes("source") || p.includes("script")) {
+        targetExtensions.push("rs", "ts", "tsx", "js", "py", "json");
+      }
+      if (p.includes("log") || p.includes("temp") || p.includes("tmp")) {
+        targetExtensions.push("log", "tmp", "bak");
+      }
+
+      for (const w of words) {
+        if ((w.startsWith(".") || w.startsWith("*.")) && w.length > 1) {
+          const ext = w.replace(/^[*.]+/, "").replace(/[^a-zA-Z0-9.]/g, "");
+          if (ext && !targetExtensions.includes(ext)) {
+            targetExtensions.push(ext);
+            if (ext.includes(".")) {
+              const term = ext.split(".").pop();
+              if (term && !targetExtensions.includes(term)) targetExtensions.push(term);
+            }
+          }
+        } else if (["pdf", "zip", "log", "tmp", "json", "txt", "csv", "md", "markdown", "rust", "rs", "typescript", "ts", "tsx", "python", "py", "golang", "go", "javascript", "js", "parquet", "arrow", "svg", "ico"].includes(w)) {
+          // If destination container format (e.g. "archive ... to zip", "compress ... into zip"), don't treat "zip" as source extension
+          if ((w === "zip" || w === "tar") && (actionKind === "archive_zip" || p.includes("to zip") || p.includes("into zip") || p.includes("into a zip") || p.includes("into archive") || p.includes("to archive"))) continue;
+          const mapped = w === "markdown" ? "md"
+            : w === "rust" ? "rs"
+              : w === "typescript" ? "ts"
+                : w === "python" ? "py"
+                  : w === "golang" ? "go"
+                    : w === "javascript" ? "js"
+                      : w;
+          targetExtensions = [mapped];
+        }
+      }
+
+      // 3. Dynamic Size Bounds Extraction
+      let minSize: number | null = null;
+      let maxSize: number | null = null;
+      const parseSize = (token: string): number | null => {
+        const clean = token.replace(/[^a-zA-Z0-9.]/g, "").toLowerCase();
+        const m = clean.match(/^([\d.]+)(gb|g|mb|m|kb|k|b)?$/);
+        if (!m) return null;
+        const val = parseFloat(m[1]);
+        if (isNaN(val)) return null;
+        const unit = m[2] || "b";
+        if (unit === "gb" || unit === "g") return val * 1024 * 1024 * 1024;
+        if (unit === "mb" || unit === "m") return val * 1024 * 1024;
+        if (unit === "kb" || unit === "k") return val * 1024;
+        return val;
+      };
+
+      for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        if (["larger", "over", "above", "exceeding", "greater", "more", ">"].includes(w) && i + 1 < words.length) {
+          const next = words[i + 1] === "than" ? words[i + 2] : words[i + 1];
+          if (next) minSize = parseSize(next);
+        } else if (["smaller", "under", "below", "less", "<"].includes(w) && i + 1 < words.length) {
+          const next = words[i + 1] === "than" ? words[i + 2] : words[i + 1];
+          if (next) maxSize = parseSize(next);
+        }
+      }
+
+      // 4. Dynamic Candidate Matching Against Active Directory Entries
+      const isFolderQuery = p.includes("folder") || p.includes("directory") || p.includes("directories") || p.includes("dir ") || p.includes("dirs");
+      const isFileQuery = (p.includes("file") || p.includes("files")) && !isFolderQuery;
+      const isLargestQuery = isLargest || p.includes("largest") || p.includes("biggest") || p.includes("heaviest") || p.includes("most space") || p.includes("takes the most");
+
+      const allEntries = getMockEntries(currentDir).map((e) => {
+        if (e.isDir) {
+          const stats = calculateMockFolderStats(e.path);
+          return { ...e, size: stats.size };
+        }
+        return e;
+      });
+
+      let candidatePool = allEntries;
+      if (isFolderQuery) {
+        candidatePool = allEntries.filter((e) => e.isDir);
+      } else if (isFileQuery) {
+        candidatePool = allEntries.filter((e) => !e.isDir);
+      } else if (!isLargestQuery) {
+        candidatePool = allEntries.filter((e) => !e.isDir);
+      }
+
+      let matched = candidatePool.filter((entry) => {
+        if (!entry.isDir && targetExtensions.length > 0) {
+          const entryExt = (entry.ext || entry.name.split(".").pop() || "").toLowerCase();
+          if (!targetExtensions.includes(entryExt)) return false;
+        }
+        if (minSize !== null && entry.size < minSize) return false;
+        if (maxSize !== null && entry.size > maxSize) return false;
+        return true;
+      });
+
+      if (isLargestQuery) {
+        matched.sort((a, b) => b.size - a.size);
+        if (matched.length > 0) {
+          const top = matched[0];
+          actionKind = "search";
+          confidence = 0.96;
+          const targetType = top.isDir ? "folder" : "file";
+          const formatted = top.size >= 1024 * 1024 * 1024
+            ? `${(top.size / (1024 * 1024 * 1024)).toFixed(2)} GB`
+            : top.size >= 1024 * 1024
+            ? `${(top.size / (1024 * 1024)).toFixed(1)} MB`
+            : `${(top.size / 1024).toFixed(0)} KB`;
+          intentSummary = `Identified largest ${targetType}: ${top.name} (${formatted})`;
+          explanation = `Analyzed storage in ${currentDir}. The largest ${targetType} is '${top.name}' taking ${formatted}.`;
+        }
+      }
+
+      const matchedCandidates = matched.map((e) => {
+        const formattedSize = e.size >= 1024 * 1024 * 1024
+          ? `${(e.size / (1024 * 1024 * 1024)).toFixed(2)} GB`
+          : e.size >= 1024 * 1024
+          ? `${(e.size / (1024 * 1024)).toFixed(1)} MB`
+          : e.size >= 1024
+          ? `${(e.size / 1024).toFixed(1)} KB`
+          : `${e.size} B`;
+        return {
+          path: e.path,
+          name: e.name,
+          isDir: e.isDir,
+          size: e.size,
+          formattedSize,
+          ext: e.ext,
+        };
+      });
+
+      const matchedFiles = matched.map((e) => e.path);
+      const totalMatchedBytes = matched.reduce((acc, e) => acc + e.size, 0);
+
+      // 5. Dynamic Safety Scoring (GRPO)
+      const safetyScore = isDestructive ? 0.85 : 1.0;
+      const warnings: string[] = [];
+      if (isDestructive) {
+        warnings.push("This operation permanently wipes candidate files beyond recovery.");
+      }
+      if (matchedFiles.length > 50) {
+        warnings.push(`High impact: operation will modify ${matchedFiles.length} files.`);
+      }
+
+      if (!isLargestQuery) {
+        if (targetExtensions.length > 0) {
+          intentSummary += ` (.${targetExtensions.join(", .")})`;
+        }
+        if (minSize !== null) {
+          intentSummary += ` > ${(minSize / 1024).toFixed(0)} KB`;
+        }
+        if (maxSize !== null) {
+          intentSummary += ` < ${(maxSize / 1024).toFixed(0)} KB`;
+        }
+      }
+
+      // Multi-Step Pipeline Formulation
+      const steps: Array<{ stepNumber: number; actionKind: string; title: string; status: "pending" | "running" | "completed" | "failed" }> = [];
+      const hasMultiStep = p.includes(" and then ") || p.includes(" then ") || p.includes(" after that ") || (p.includes(" and ") && (p.includes("shred") || p.includes("wipe") || p.includes("delete")) && (p.includes("zip") || p.includes("compress") || p.includes("archive") || p.includes("organize")));
+
+      if (hasMultiStep) {
+        if ((p.includes("zip") || p.includes("compress") || p.includes("archive")) && (p.includes("shred") || p.includes("wipe") || p.includes("delete"))) {
+          steps.push({
+            stepNumber: 1,
+            actionKind: "archive_zip",
+            title: `Compress ${matchedFiles.length} matched files into ZIP archive`,
+            status: "pending",
+          });
+          steps.push({
+            stepNumber: 2,
+            actionKind: "shred",
+            title: `Cryptographically wipe ${matchedFiles.length} original files`,
+            status: "pending",
+          });
+        } else if (p.includes("clone") && p.includes("tag")) {
+          steps.push({
+            stepNumber: 1,
+            actionKind: "clone_cow",
+            title: `Fast copy-on-write clone of ${matchedFiles.length} items`,
+            status: "pending",
+          });
+          steps.push({
+            stepNumber: 2,
+            actionKind: "tag",
+            title: `Apply tag metadata to ${matchedFiles.length} items`,
+            status: "pending",
+          });
+        } else if ((p.includes("largest") || p.includes("search") || p.includes("find")) && p.includes("organize")) {
+          steps.push({
+            stepNumber: 1,
+            actionKind: "search",
+            title: `Filter and rank ${matchedFiles.length} matching items`,
+            status: "pending",
+          });
+          steps.push({
+            stepNumber: 2,
+            actionKind: "organize_by_extension",
+            title: `Sort ${matchedFiles.length} items into subfolders by extension`,
+            status: "pending",
+          });
+        }
+      }
+
+      if (steps.length === 0) {
+        steps.push({
+          stepNumber: 1,
+          actionKind,
+          title: intentSummary,
+          status: "pending",
+        });
+      }
+
       return {
-        rawPrompt: String(args?.prompt || ""),
-        intentSummary: "Analyze directory structure and organize files by category.",
-        actionKind: "move_by_extension",
-        confidence: 0.95,
-        isDestructive: false,
-        targetPatterns: ["*.*"],
-        matchedFiles: ["demo.png", "doc.pdf"],
-        totalMatchedBytes: 1048576,
-        explanation: "Group files cleanly by their type.",
+        planId: "mock-plan-" + Date.now(),
+        rawPrompt,
+        intentSummary,
+        actionKind,
+        confidence,
+        isDestructive,
+        requiresExplicitConfirm: isDestructive,
+        safetyScore,
+        warnings,
+        targetPatterns: targetExtensions.length > 0 ? targetExtensions.map((e) => `*.${e}`) : ["*.*"],
+        matchedFiles,
+        matchedCandidates,
+        totalMatchedBytes,
+        explanation: explanation || `Neuro-symbolic intent verified against ${matchedFiles.length} matched items in ${currentDir}.`,
+        createdAtMs: Date.now(),
+        steps,
       } as unknown as T;
-    case "tools_copilot_execute":
+    }
+    case "tools_copilot_execute": {
+      const plan = args?.plan as { matchedFiles?: string[]; matchedCandidates?: Array<{ name: string; isDir?: boolean }>; intentSummary?: string; actionKind?: string; totalMatchedBytes?: number; steps?: Array<{ stepNumber: number; actionKind: string; title: string }> } | undefined;
+      const count = plan?.matchedFiles?.length ?? 1;
+      const action = plan?.actionKind;
+      const currentDir = String(args?.currentDir || "D:\\code\\Main_projects\\NexusExplorer");
+
+      if (plan?.steps && plan.steps.length > 1) {
+        const stepMessages: string[] = [];
+        let totalCount = 0;
+        const allAffected: string[] = [];
+        for (const step of plan.steps) {
+          if (step.actionKind === "archive_zip") {
+            const zipName = `Archive_${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.zip`;
+            const zipPath = `${currentDir}\\${zipName}`;
+            addMockEntryToParent(currentDir, {
+              name: zipName,
+              path: zipPath,
+              parentPath: currentDir,
+              isDir: false,
+              size: plan?.totalMatchedBytes || 4096,
+              modifiedMs: Date.now(),
+              createdMs: Date.now(),
+              isHidden: false,
+              isSystem: false,
+              isReadonly: false,
+              ext: "zip",
+            });
+            allAffected.push(zipPath);
+            stepMessages.push(`Step ${step.stepNumber}: Compressed ${count} files into ${zipName}`);
+            totalCount += count;
+          } else if (step.actionKind === "shred" && plan?.matchedFiles) {
+            deleteMockPaths(plan.matchedFiles);
+            allAffected.push(...plan.matchedFiles);
+            stepMessages.push(`Step ${step.stepNumber}: Cryptographically wiped ${count} original files`);
+            totalCount += count;
+          } else if ((step.actionKind === "move_by_extension" || step.actionKind === "organize_by_extension") && plan?.matchedFiles) {
+            stepMessages.push(`Step ${step.stepNumber}: Organized ${count} files into extension folders`);
+            totalCount += count;
+          } else {
+            stepMessages.push(`Step ${step.stepNumber}: Executed ${step.title}`);
+            totalCount += count;
+          }
+        }
+        return {
+          success: true,
+          processedCount: totalCount,
+          message: `Multi-step pipeline completed: ${stepMessages.join(" → ")}`,
+          affectedPaths: allAffected,
+        } as unknown as T;
+      }
+
+      if (action === "shred" && plan?.matchedFiles) {
+        deleteMockPaths(plan.matchedFiles);
+        return {
+          success: true,
+          processedCount: count,
+          message: `Cryptographically shredded ${count} files with DoD 5220.22-M`,
+          affectedPaths: plan.matchedFiles,
+        } as unknown as T;
+      }
+
+      if ((action === "move_by_extension" || action === "organize_by_extension") && plan?.matchedFiles) {
+        const affected: string[] = [];
+        for (const filePath of plan.matchedFiles) {
+          const ext = filePath.split(".").pop()?.toUpperCase() || "MISC";
+          const fileName = filePath.split(/[/\\]/).pop() || "file";
+          const targetFolder = `${currentDir}\\${ext}`;
+          const newPath = `${targetFolder}\\${fileName}`;
+          deleteMockPaths([filePath]);
+          addMockEntryToParent(targetFolder, {
+            name: fileName,
+            path: newPath,
+            parentPath: targetFolder,
+            isDir: false,
+            size: 2048,
+            modifiedMs: Date.now(),
+            createdMs: Date.now(),
+            isHidden: false,
+            isSystem: false,
+            isReadonly: false,
+            ext: ext.toLowerCase(),
+          });
+          affected.push(newPath);
+        }
+        return {
+          success: true,
+          processedCount: count,
+          message: `Organized ${count} files into extension directories`,
+          affectedPaths: affected,
+        } as unknown as T;
+      }
+
+      if (action === "archive_zip") {
+        const zipName = `Archive_${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.zip`;
+        const zipPath = `${currentDir}\\${zipName}`;
+        addMockEntryToParent(currentDir, {
+          name: zipName,
+          path: zipPath,
+          parentPath: currentDir,
+          isDir: false,
+          size: plan?.totalMatchedBytes || 4096,
+          modifiedMs: Date.now(),
+          createdMs: Date.now(),
+          isHidden: false,
+          isSystem: false,
+          isReadonly: false,
+          ext: "zip",
+        });
+        return {
+          success: true,
+          processedCount: count,
+          message: `Compressed ${count} files into ${zipName}`,
+          affectedPaths: [zipPath],
+        } as unknown as T;
+      }
+
+      if (action === "clone_cow" && plan?.matchedFiles) {
+        const affected: string[] = [];
+        for (const filePath of plan.matchedFiles) {
+          const fileName = filePath.split(/[/\\]/).pop() || "item";
+          const copyName = fileName.includes(".")
+            ? fileName.replace(/(\.[^.]+)$/, "_copy$1")
+            : `${fileName}_copy`;
+          const copyPath = `${currentDir}\\${copyName}`;
+          addMockEntryToParent(currentDir, {
+            name: copyName,
+            path: copyPath,
+            parentPath: currentDir,
+            isDir: false,
+            size: 2048,
+            modifiedMs: Date.now(),
+            createdMs: Date.now(),
+            isHidden: false,
+            isSystem: false,
+            isReadonly: false,
+            ext: copyName.split(".").pop() || "",
+          });
+          affected.push(copyPath);
+        }
+        return {
+          success: true,
+          processedCount: count,
+          message: `Cloned ${count} items using ReFS Block Cloning (CoW)`,
+          affectedPaths: affected,
+        } as unknown as T;
+      }
+
+      const topName = plan?.matchedCandidates?.[0]?.name || plan?.matchedFiles?.[0]?.split(/[/\\]/).pop();
+      const topType = plan?.matchedCandidates?.[0]?.isDir ? "folder" : "file";
+      const message = count === 1 && topName
+        ? `Located and highlighted ${topType} '${topName}' in Explorer`
+        : `Located and highlighted ${count} matching item(s) in Explorer`;
+
       return {
         success: true,
-        executedActionsCount: 1,
-        message: "Successfully executed planned copilot action.",
+        processedCount: count,
+        message,
+        affectedPaths: plan?.matchedFiles ?? [],
       } as unknown as T;
+    }
+    case "tools_copilot_feedback":
+      return undefined as unknown as T;
 
     case "tools_clone_file": {
       const src = String(args?.srcPath || args?.sourcePath || "");
-      const dest = String(args?.destPath || "");
-      const name = dest.split(/[\/\\]/).pop() || "copy";
-      const pDir = dest.substring(0, dest.lastIndexOf("\\")).toLowerCase();
-      const ext = name.split(".").pop() || "";
+      const dest = String(args?.destPath || "").replace(/\//g, "\\");
+      const name = dest.split("\\").pop() || "copy";
+      const parent = dest.substring(0, dest.lastIndexOf("\\")) || "D:\\code\\Main_projects";
+      const ext = name.includes(".") ? name.split(".").pop() || "" : "";
       const newEntry: FileEntry = {
         name,
         path: dest,
-        parentPath: dest.substring(0, dest.lastIndexOf("\\")),
+        parentPath: parent,
         isDir: false,
         size: 1_048_576,
         modifiedMs: Date.now(),
@@ -856,8 +1555,7 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         isReadonly: false,
         ext,
       };
-      if (!mockAddedEntries[pDir]) mockAddedEntries[pDir] = [];
-      mockAddedEntries[pDir].push(newEntry);
+      addMockEntryToParent(parent, newEntry);
       return {
         sourcePath: src,
         destPath: dest,
@@ -867,14 +1565,156 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
       } as unknown as T;
     }
 
-    case "tools_shred_paths":
+    case "tools_ioring_status": {
       return {
-        filesDestroyed: 1,
+        supported: true,
+        apiVersion: 1,
+        maxQueueDepth: 1024,
+        submissionQueueSize: 512,
+        completionQueueSize: 512,
+        kernelAccelerated: true,
+        fallbackMode: "None (Windows 11 Ring Active)",
+      } as unknown as T;
+    }
+
+    case "tools_generate_sanitization_cert": {
+      const p = String(args?.path || "C:\\Confidential\\Target.dat");
+      return {
+        certificateId: "mock-cert-" + Date.now(),
+        timestampUtc: new Date().toISOString(),
+        operator: String(args?.operator || "Nexus Compliance Officer"),
+        systemHostname: "WORKSTATION-01",
+        mediaPath: p,
+        mediaType: "NVMe Solid State Block Storage (FTL Overprovisioned)",
+        standard: "NIST SP 800-88 Rev 1 (Media Sanitization)",
+        method: "Purge (Cryptographic Erase & Verification)",
+        algorithmApplied: (args?.algorithm as any) || "nist-purge",
+        bytesSanitized: 1048576,
+        preShredDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        postVerificationStatus: "Verified Non-Recoverable - All Overwritten Sectors Zeroed/Inaccessible",
+        cryptographicSeal: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6a1b2c3d4e5f60718293a",
+      } as unknown as T;
+    }
+
+    case "tools_fastcdc_analyze": {
+      const inputPaths = (args?.paths as string[]) || [];
+      const fileCount = inputPaths.length > 0 ? inputPaths.length : 8;
+      return {
+        totalFilesAnalyzed: fileCount,
+        totalBytesRaw: 52428800,
+        totalChunksProduced: 6400,
+        uniqueChunksCount: 4200,
+        uniqueBytes: 34406400,
+        duplicateChunksCount: 2200,
+        duplicateBytesSaved: 18022400,
+        deduplicationRatio: 1.52,
+        elapsedMs: 42,
+        sharedBlockSamples: [
+          {
+            chunkHash: "3f79a9042b1029c782163b4d8d179609",
+            chunkSize: 8192,
+            occurrenceCount: 14,
+            referencedInFiles: ["app.bundle.js", "vendor.bundle.js"],
+          },
+        ],
+      } as unknown as T;
+    }
+
+    case "tools_entropy_inspect": {
+      return {
+        filePath: normPath,
+        fileSize: 65536,
+        overallEntropy: 7.92,
+        headerEntropy: 7.94,
+        tailEntropy: 7.91,
+        classification: "encryptedOrRansomwareSuspect",
+        confidenceScore: 0.96,
+        detectedMagic: undefined,
+        chunkDistribution: [
+          { offset: 0, length: 65536, entropy: 7.92 },
+        ],
+        elapsedMs: 3,
+        advisory: "CRITICAL: Uniform near-maximum randomness detected without container signature.",
+      } as unknown as T;
+    }
+
+    case "tools_merkle_build": {
+      const p = String(args?.dir || normPath);
+      return {
+        rootPath: p,
+        merkleRootHash: "b3a1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        totalFiles: 3,
+        totalBytes: 1572864,
+        treeDepth: 2,
+        elapsedMs: 8,
+        leaves: [
+          { relativePath: "Cargo.toml", fileSize: 340, modifiedMs: Date.now() - 3600000, leafHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+          { relativePath: "src/main.rs", fileSize: 25600, modifiedMs: Date.now() - 1800000, leafHash: "a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0" },
+          { relativePath: "README.md", fileSize: 1024, modifiedMs: Date.now() - 7200000, leafHash: "f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4e5f60718293a4b5c6d7e8f9a0" },
+        ],
+      } as unknown as T;
+    }
+
+    case "tools_merkle_proof": {
+      const target = String(args?.relPath || "src/main.rs");
+      return {
+        targetRelativePath: target,
+        leafHash: "a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0",
+        leafIndex: 1,
+        totalLeaves: 3,
+        auditPath: [
+          ["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", true],
+          ["f1e2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4e5f60718293a4b5c6d7e8f9a0", false],
+        ],
+        expectedRootHash: "b3a1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        isValid: true,
+      } as unknown as T;
+    }
+
+    case "tools_merkle_verify": {
+      return true as unknown as T;
+    }
+
+    case "tools_merkle_diff": {
+      return {
+        rootHashA: "b3a1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        rootHashB: "b3a1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        isIdentical: true,
+        addedFiles: [],
+        removedFiles: [],
+        modifiedFiles: [],
+        unmodifiedCount: 3,
+        elapsedMs: 2,
+      } as unknown as T;
+    }
+
+    case "tools_archive_create_sort_enhanced": {
+      const dest = String(args?.destZipPath || "archive_sorted.zip");
+      return {
+        success: true,
+        archivePath: dest,
+        destinationPath: dest,
+        filesProcessed: 12,
+        bytesProcessed: 1048576,
+        elapsedMs: 38,
+        errorMessage: undefined,
+      } as unknown as T;
+    }
+
+    case "tools_shred_paths": {
+      const paths = (args?.paths as string[]) || (args?.path ? [String(args.path)] : [normPath]);
+      deleteMockPaths(paths);
+      return {
+        filesDestroyed: paths.length || 1,
+        directoriesRemoved: 0,
         totalBytesShredded: 1_024,
         passesCompleted: 3,
         algorithm: "dod3",
         elapsedMs: 5,
+        errors: [],
+        advisory: "Advisory: On Solid State Drives (SSDs with FTL wear-leveling) and CoW filesystems (ReFS/Btrfs), full-volume encryption (BitLocker) is recommended.",
       } as unknown as T;
+    }
 
     case "tools_sniff_file":
       return {
@@ -890,14 +1730,41 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
     case "tools_audit_directory":
       return [] as unknown as T;
 
-    case "tools_compare_binary":
+    case "tools_compare_binary": {
+      const p = (args || {}) as { fileA?: string; fileB?: string; forceDiff?: boolean };
+      const fileA = p.fileA || "fileA.bin";
+      const fileB = p.fileB || "fileB.bin";
+      const hasDiff = p.forceDiff || (fileA.toLowerCase().includes("file1") && fileB.toLowerCase().includes("file2"));
+      const isIdentical = !hasDiff;
       return {
-        isIdentical: true,
-        matchingPercentage: 100,
-        totalDifferencesBytes: 0,
-        firstDiffOffset: null,
-        chunkRows: [],
+        fileA,
+        fileB,
+        sizeA: 2048,
+        sizeB: isIdentical ? 2048 : 2056,
+        isIdentical,
+        matchingPercentage: isIdentical ? 100 : 96.5,
+        totalDifferencesBytes: isIdentical ? 0 : 72,
+        firstDifferenceOffset: isIdentical ? null : 0x0040,
+        diffChunks: isIdentical ? [] : [
+          {
+            offset: 0x0040,
+            leftHex: "4E 65 78 75 73 31 00 00",
+            rightHex: "4E 65 78 75 73 32 00 00",
+            leftAscii: "Nexus1..",
+            rightAscii: "Nexus2..",
+            isMatch: false,
+          },
+          {
+            offset: 0x0048,
+            leftHex: "01 02 03 04 05 06 07 08",
+            rightHex: "01 02 03 04 05 06 07 08",
+            leftAscii: "........",
+            rightAscii: "........",
+            isMatch: true,
+          },
+        ],
       } as unknown as T;
+    }
 
     case "tools_get_locking_processes":
       if (!mockTerminatedPids.has(14208) && (normPath.toLowerCase().includes("confidential_keys") || normPath.toLowerCase().includes("sample_track"))) {
@@ -1000,7 +1867,7 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
           const monthStr = String(now.getMonth() + 1).padStart(2, "0");
           const dayStr = String(now.getDate()).padStart(2, "0");
           const folderName = parentDir.split(/[\\/]/).pop() || "";
-          
+
           targetBase = template
             .replace(/[\{<]name[\}>]/gi, baseName)
             .replace(/[\{<]ext[\}>]/gi, ext)
@@ -1090,8 +1957,8 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
       };
       mockUndoStack.push({
         label: `Batch Rename (${plan.length} item${plan.length > 1 ? "s" : ""})`,
-        undo: () => {},
-        redo: () => {},
+        undo: () => { },
+        redo: () => { },
       });
       mockRedoStack.length = 0;
       return tx as unknown as T;
@@ -1271,6 +2138,304 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         elapsedMs: 42,
       } as unknown as T;
 
+    case "tools_janitor_clean_empty":
+      return {
+        removedCount: (args?.paths as string[])?.length ?? 3,
+        failedCount: 0,
+        errors: [],
+      } as unknown as T;
+
+    case "usb_list_devices":
+      return mockUsbList as unknown as T;
+
+    case "usb_get_device": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const dev = mockUsbList.find((d) => d.path.toUpperCase().startsWith(devPath) || devPath.startsWith(d.path.toUpperCase())) || mockUsbList[0];
+      return dev as unknown as T;
+    }
+
+    case "usb_get_locks": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const key = Object.keys(mockUsbLocks).find((k) => k.toUpperCase().startsWith(devPath) || devPath.startsWith(k.toUpperCase())) || "";
+      return (mockUsbLocks[key] || []) as unknown as T;
+    }
+
+    case "usb_eject_device": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const force = Boolean(args?.force);
+      const key = Object.keys(mockUsbLocks).find((k) => k.toUpperCase().startsWith(devPath) || devPath.startsWith(k.toUpperCase())) || "";
+      const locks = mockUsbLocks[key] || [];
+      if (locks.length > 0 && !force) {
+        throw new Error(
+          `Device is currently locked by ${locks.length} active process${locks.length > 1 ? "es" : ""}: ${locks.map((l) => `${l.name} (PID ${l.pid})`).join(", ")}. Please close open files or use Unlock & Safely Eject.`
+        );
+      }
+      mockUsbList = mockUsbList.filter((d) => !d.path.toUpperCase().startsWith(devPath) && !devPath.startsWith(d.path.toUpperCase()));
+      return {
+        success: true,
+        message: `Volume ${devPath} unmounted and cache flushed. It is now safe to unplug the USB device.`,
+      } as unknown as T;
+    }
+
+    case "usb_unlock_and_eject": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const key = Object.keys(mockUsbLocks).find((k) => k.toUpperCase().startsWith(devPath) || devPath.startsWith(k.toUpperCase())) || "";
+      const count = (mockUsbLocks[key] || []).length;
+      mockUsbLocks[key] = [];
+      mockUsbList = mockUsbList.filter((d) => !d.path.toUpperCase().startsWith(devPath) && !devPath.startsWith(d.path.toUpperCase()));
+      return {
+        success: true,
+        terminatedCount: count,
+        message: `Terminated ${count} locking process handles, committed all pending write cache buffers to NAND flash, and safely unmounted ${devPath}.`,
+      } as unknown as T;
+    }
+
+    case "usb_format": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const opts = (args?.options || {}) as UsbFormatOptions;
+      const dev = mockUsbList.find((d) => d.path.toUpperCase().startsWith(devPath) || devPath.startsWith(d.path.toUpperCase()));
+      if (dev) {
+        dev.filesystem = opts.filesystem || "exFAT";
+        dev.label = opts.label || dev.label;
+        dev.usedBytes = 32768;
+        dev.freeBytes = dev.totalBytes - 32768;
+      }
+      return {
+        success: true,
+        message: `Formatted volume ${devPath} (${opts.label || "USB"}) as ${opts.filesystem || "exFAT"} with ${((opts.clusterSize || 131072) / 1024).toFixed(0)} KB cluster alignment.`,
+      } as unknown as T;
+    }
+
+    case "usb_benchmark": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const isHighSpeed = devPath.includes("E:");
+      return {
+        seqReadMBps: isHighSpeed ? 1045 : 39.4,
+        seqWriteMBps: isHighSpeed ? 890 : 24.8,
+        sustainedWriteMBps: isHighSpeed ? 820 : 18.2,
+        rand4kReadIOPS: isHighSpeed ? 62400 : 1240,
+        rand4kWriteIOPS: isHighSpeed ? 48500 : 420,
+        elapsedMs: 3820,
+        bufferBurstDropRatio: isHighSpeed ? 1.08 : 1.36,
+      } as unknown as T;
+    }
+
+    case "usb_integrity_test": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const isSuspect = devPath.includes("F:") && args?.quick === false;
+      return {
+        passed: !isSuspect,
+        claimedCapacityBytes: 124_000_000_000,
+        verifiedCapacityBytes: isSuspect ? 16_000_000_000 : 124_000_000_000,
+        corruptedBytes: isSuspect ? 108_000_000_000 : 0,
+        isCounterfeit: isSuspect,
+        suspectedRealCapacityBytes: isSuspect ? 16_000_000_000 : 124_000_000_000,
+        elapsedMs: 2950,
+        speedMBps: 34.5,
+        statusMessage: isSuspect
+          ? "CRITICAL: Counterfeit flash controller detected! Data wrote fine for first 16 GB, but subsequent writes looped or corrupted blocks. True capacity is ~16 GB."
+          : "PASSED: All pseudo-random test sectors verified with zero bit-rot or checksum mismatch. Flash capacity is genuine.",
+      } as unknown as T;
+    }
+
+    case "usb_set_cache_policy": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const policy = args?.policy as "quick_removal" | "better_performance";
+      const dev = mockUsbList.find((d) => d.path.toUpperCase().startsWith(devPath) || devPath.startsWith(d.path.toUpperCase()));
+      if (dev) {
+        dev.writeCachePolicy = policy || "quick_removal";
+      }
+      return dev as unknown as T;
+    }
+
+    case "usb_create_disk_image": {
+      const opts = (args?.options || {}) as UsbDiskImageOptions;
+      return {
+        success: true,
+        bytesWritten: 124_000_000_000,
+        path: opts.targetImagePath || "D:\\backups\\usb_clone.img",
+      } as unknown as T;
+    }
+
+    case "usb_burn_disk_image": {
+      return {
+        success: true,
+        bytesWritten: 4_294_967_296,
+      } as unknown as T;
+    }
+
+    case "usb_surface_scan": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const hasBad = devPath.includes("F:");
+      const blocks: UsbSurfaceScanBlock[] = [];
+      let fastCount = 0;
+      let goodCount = 0;
+      let normalCount = 0;
+      let slowCount = 0;
+      let criticalCount = 0;
+      let badCount = 0;
+
+      for (let i = 0; i < 120; i++) {
+        let status: UsbSurfaceScanBlock["status"] = "fast";
+        let latencyMs = 2.1 + (i % 3);
+
+        if (hasBad && (i === 42 || i === 87)) {
+          status = "bad";
+          latencyMs = 1500;
+          badCount++;
+        } else if (hasBad && (i === 41 || i === 86)) {
+          status = "critical";
+          latencyMs = 620;
+          criticalCount++;
+        } else if (i % 17 === 0) {
+          status = "slow";
+          latencyMs = 120;
+          slowCount++;
+        } else if (i % 7 === 0) {
+          status = "normal";
+          latencyMs = 38;
+          normalCount++;
+        } else if (i % 3 === 0) {
+          status = "good";
+          latencyMs = 14;
+          goodCount++;
+        } else {
+          status = "fast";
+          latencyMs = 3.2;
+          fastCount++;
+        }
+
+        blocks.push({
+          id: i,
+          status,
+          latencyMs,
+          lba: i * 16384,
+        });
+      }
+
+      return {
+        totalBlocks: 120,
+        scannedBlocks: 120,
+        fastCount,
+        goodCount,
+        normalCount,
+        slowCount,
+        criticalCount,
+        badCount,
+        blocks,
+        isScanning: false,
+        elapsedMs: 2450,
+        avgLatencyMs: hasBad ? 18.4 : 4.8,
+        maxLatencyMs: hasBad ? 1500 : 42,
+      } as unknown as T;
+    }
+
+    case "usb_get_multiboot": {
+      return {
+        isVentoyInstalled: true,
+        bootloaderVersion: "v1.0.99 (Nexus-EFI Core)",
+        partitionScheme: "GPT",
+        secureBootEnabled: true,
+        isos: [
+          {
+            id: "iso-1",
+            name: "Windows 11 24H2 Pro / Enterprise",
+            osFamily: "windows",
+            fileName: "Win11_24H2_English_x64.iso",
+            sizeBytes: 5_800_000_000,
+            uefiCompatible: true,
+            secureBootSigned: true,
+            hasPersistence: false,
+            isActive: true,
+          },
+          {
+            id: "iso-2",
+            name: "Ubuntu 24.04 LTS (Noble Numbat)",
+            osFamily: "linux",
+            fileName: "ubuntu-24.04-desktop-amd64.iso",
+            sizeBytes: 4_900_000_000,
+            uefiCompatible: true,
+            secureBootSigned: true,
+            hasPersistence: true,
+            persistenceSizeMB: 8192,
+            isActive: true,
+          },
+          {
+            id: "iso-3",
+            name: "Clonezilla Live 3.1 (Disk Imaging)",
+            osFamily: "utility",
+            fileName: "clonezilla-live-3.1.2-22-amd64.iso",
+            sizeBytes: 420_000_000,
+            uefiCompatible: true,
+            secureBootSigned: false,
+            hasPersistence: false,
+            isActive: true,
+          },
+        ],
+      } as unknown as T;
+    }
+
+    case "usb_install_ventoy": {
+      return {
+        isVentoyInstalled: true,
+        bootloaderVersion: "v1.0.99 (Nexus-EFI Core)",
+        partitionScheme: "GPT",
+        secureBootEnabled: true,
+        isos: [],
+      } as unknown as T;
+    }
+
+    case "usb_add_multiboot_iso": {
+      const isoPath = String(args?.isoPath || "new_os.iso");
+      const name = isoPath.split(/[\\/]/).pop() || "Custom OS Image";
+      return {
+        id: `iso-${Date.now()}`,
+        name: name.replace(/\.iso$/i, ""),
+        osFamily: name.toLowerCase().includes("win") ? "windows" : name.toLowerCase().includes("lin") || name.toLowerCase().includes("ubu") ? "linux" : "utility",
+        fileName: name,
+        sizeBytes: 3_800_000_000,
+        uefiCompatible: true,
+        secureBootSigned: true,
+        hasPersistence: false,
+        isActive: true,
+      } as unknown as T;
+    }
+
+    case "usb_get_topology": {
+      const devPath = String(args?.path || "").toUpperCase();
+      const isHighSpeed = devPath.includes("E:");
+      return {
+        controllerName: "Intel(R) USB 3.20 eXtensible Host Controller - 1.20 (Microsoft)",
+        controllerType: isHighSpeed ? "xHCI (USB 3.2)" : "EHCI (USB 2.0)",
+        rootHubPort: isHighSpeed ? 2 : 7,
+        negotiatedSpeed: isHighSpeed ? "SuperSpeedPlus (10 Gbps Gen 2x1)" : "HighSpeed (480 Mbps)",
+        busPowerMa: isHighSpeed ? 900 : 500,
+        usbPdSupported: isHighSpeed,
+        usbPdVoltageV: isHighSpeed ? 5.0 : 5.0,
+        usbPdCurrentA: isHighSpeed ? 3.0 : 0.5,
+        endpoints: [
+          { ep: 0, direction: "IN", type: "Control", maxPacketSize: 64 },
+          { ep: 1, direction: "IN", type: "Bulk", maxPacketSize: 1024 },
+          { ep: 2, direction: "OUT", type: "Bulk", maxPacketSize: 1024 },
+          { ep: 3, direction: "IN", type: "Interrupt", maxPacketSize: 512 },
+        ],
+      } as unknown as T;
+    }
+
+    case "usb_forensic_sanitize": {
+      const standard = String(args?.standard || "nist_800_88_purge");
+      return {
+        standard: standard as any,
+        passesCompleted: standard === "gutmann_35" ? 35 : standard === "dod_5220_22_m" ? 3 : 1,
+        totalPasses: standard === "gutmann_35" ? 35 : standard === "dod_5220_22_m" ? 3 : 1,
+        bytesSanitized: 124_000_000_000,
+        verificationPassed: true,
+        cryptoHashSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        certificateId: `NIST-SAN-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+        completedAt: new Date().toISOString(),
+      } as unknown as T;
+    }
+
     case "tools_mounter_mount":
       return {
         driveLetter: "Z:",
@@ -1279,14 +2444,33 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         readOnly: true,
       } as unknown as T;
 
-    case "tools_metadata_read":
+    case "tools_metadata_read": {
+      const ext = normPath.split(".").pop()?.toLowerCase() || "";
+      const isImg = ["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp"].includes(ext);
+      const isAud = ["mp3", "wav", "flac", "ogg", "aac", "m4a"].includes(ext);
+      const kind = isImg ? "image" : isAud ? "audio" : "unknown";
+      const fileName = normPath.split(/[\\/]/).pop() || "";
       return {
-        title: "Nexus Document",
-        artist: "Nexus Explorer",
-        duration: 180,
-        dimensions: { width: 1920, height: 1080 },
-        format: "mp4",
+        path: normPath,
+        kind,
+        format: ext || "dat",
+        fileSize: 4580000,
+        title: fileName,
+        artist: "Nexus Explorer Studio",
+        album: "Production Suite 2027",
+        year: "2027",
+        trackNumber: 1,
+        genre: "Workstation Media",
+        cameraMake: isImg ? "Sony" : null,
+        cameraModel: isImg ? "Alpha 7R V" : null,
+        dateTaken: isImg ? "Today 12:45 PM" : null,
+        iso: isImg ? 400 : null,
+        fNumber: isImg ? 2.8 : null,
+        exposureTime: isImg ? "1/250s" : null,
+        focalLength: isImg ? 35 : null,
+        dimensions: isImg ? [3840, 2160] : null,
       } as unknown as T;
+    }
 
     case "tools_list_all_tags":
       return [] as unknown as T;
@@ -1306,12 +2490,28 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         sampleScriptPath: "D:\\code\\Main_projects\\NexusExplorer\\.nexus\\plugins\\sample\\main.js",
       } as unknown as T;
 
-    case "tools_get_note":
-      return null as unknown as T;
+    case "tools_get_note": {
+      const fPath = String(args?.path || args?.filePath || normPath).replace(/\//g, "\\").toLowerCase();
+      return (mockNotesMap.get(fPath) || null) as unknown as T;
+    }
 
-    case "tools_set_note":
-    case "tools_delete_note":
-      return undefined as unknown as T;
+    case "tools_set_note": {
+      const fPath = String(args?.path || args?.filePath || normPath).replace(/\//g, "\\");
+      const noteMarkdown = String(args?.markdown || args?.noteMarkdown || args?.note || "");
+      const note: FileAnnotation = {
+        path: fPath,
+        noteMarkdown,
+        updatedMs: Date.now(),
+      };
+      mockNotesMap.set(fPath.toLowerCase(), note);
+      return note as unknown as T;
+    }
+
+    case "tools_delete_note": {
+      const fPath = String(args?.path || args?.filePath || normPath).replace(/\//g, "\\").toLowerCase();
+      mockNotesMap.delete(fPath);
+      return true as unknown as T;
+    }
     case "create_folder": {
       const parent = String(args?.parent || "D:\\code");
       const name = String(args?.name || "New folder");
@@ -1440,16 +2640,56 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         hardlinkCount: 1,
       } as unknown as T;
 
+    case "tools_set_timestamps": {
+      const fPath = String(args?.path || normPath).replace(/\//g, "\\");
+      const modMs = Number(args?.modifiedMs || Date.now());
+      const parent = fPath.substring(0, fPath.lastIndexOf("\\")).toLowerCase();
+      const list = mockDirMap.get(parent);
+      if (list) {
+        const item = list.find((e) => e.path.replace(/\//g, "\\").toLowerCase() === fPath.toLowerCase());
+        if (item) item.modifiedMs = modMs;
+      }
+      return undefined as unknown as T;
+    }
+
+    case "tools_set_attributes": {
+      const fPath = String(args?.path || normPath).replace(/\//g, "\\");
+      const ro = Boolean(args?.readonly);
+      const hidden = Boolean(args?.hidden);
+      const parent = fPath.substring(0, fPath.lastIndexOf("\\")).toLowerCase();
+      const list = mockDirMap.get(parent);
+      if (list) {
+        const item = list.find((e) => e.path.replace(/\//g, "\\").toLowerCase() === fPath.toLowerCase());
+        if (item) {
+          item.isReadonly = ro;
+          item.isHidden = hidden;
+        }
+      }
+      return undefined as unknown as T;
+    }
+
     case "tools_create_link":
     case "tools_remove_link":
-    case "tools_set_timestamps":
-    case "tools_set_attributes":
     case "open_path":
     case "open_terminal":
     case "reveal_in_shell":
     case "watch_dir":
     case "unwatch_dir":
     case "cancel_scan":
+    case "folder_size": {
+      const p = String(args?.path || normPath);
+      const stats = calculateMockFolderStats(p);
+      const onEvent = args?.onEvent as ((event: any) => void) | undefined;
+      const taskId = "mock-size-" + Date.now();
+      if (typeof onEvent === "function") {
+        setTimeout(() => {
+          onEvent({ event: "progress", data: { taskId, files: stats.files, folders: stats.folders, bytes: stats.size } });
+          onEvent({ event: "done", data: { taskId, size: stats.size, files: stats.files, folders: stats.folders, elapsedMs: 15 } });
+        }, 30);
+      }
+      return taskId as unknown as T;
+    }
+
     case "cancel_folder_size":
     case "cancel_search":
     case "resolve_conflict":
@@ -1574,6 +2814,20 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         ],
       } as unknown as T;
 
+    case "tools_usn_search":
+      return [
+        {
+          usn: 2097152,
+          fileReferenceNumber: 4096,
+          parentFileReferenceNumber: 1024,
+          reasons: ["DATA_OVERWRITE", "CLOSE"],
+          reasonRaw: 0x80000001,
+          fileName: (args?.query as string) || "nexus_target_file.rs",
+          timestamp: new Date().toISOString(),
+          fileAttributes: 32,
+        },
+      ] as unknown as T;
+
     case "tools_archive_list":
       return {
         archivePath: normPath,
@@ -1591,9 +2845,7 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
       } as unknown as T;
 
     case "tools_archive_extract":
-    case "tools_archive_create":
     case "tools_archive_extract_any":
-    case "tools_archive_create_any":
       return {
         success: true,
         filesProcessed: 3,
@@ -1601,6 +2853,34 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         elapsedMs: 45,
         message: "Archive operation completed successfully.",
       } as unknown as T;
+
+    case "tools_archive_create":
+    case "tools_archive_create_any": {
+      const destZip = String(args?.destZipPath || args?.destPath || "archive.zip").replace(/\//g, "\\");
+      const name = destZip.split("\\").pop() || "archive.zip";
+      const parent = destZip.substring(0, destZip.lastIndexOf("\\")) || "D:\\code\\Main_projects";
+      const zipEntry: FileEntry = {
+        name,
+        path: destZip,
+        parentPath: parent,
+        isDir: false,
+        size: 2_048_000,
+        modifiedMs: Date.now(),
+        createdMs: Date.now(),
+        isHidden: false,
+        isSystem: false,
+        isReadonly: false,
+        ext: "zip",
+      };
+      addMockEntryToParent(parent, zipEntry);
+      return {
+        success: true,
+        filesProcessed: 3,
+        totalBytes: 2048000,
+        elapsedMs: 45,
+        message: "Archive created successfully.",
+      } as unknown as T;
+    }
 
     case "tools_archive_find_7z":
       return "C:\\Program Files\\7-Zip\\7z.exe" as unknown as T;
@@ -1631,11 +2911,11 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
         additions: 12,
         deletions: 4,
         lines: [
-          { kind: "context", content: " import { ipc } from '@/lib/ipc';", oldLineNumber: 1, newLineNumber: 1 },
-          { kind: "delete", content: "-const legacy = false;", oldLineNumber: 2, newLineNumber: null },
-          { kind: "add", content: "+const nexus2027 = true;", oldLineNumber: null, newLineNumber: 2 },
-          { kind: "add", content: "+const highThroughput = true;", oldLineNumber: null, newLineNumber: 3 },
-          { kind: "context", content: " export function run() {", oldLineNumber: 3, newLineNumber: 4 },
+          { lineType: "context", kind: "context", text: " import { ipc } from '@/lib/ipc';", content: " import { ipc } from '@/lib/ipc';", oldLineNum: 1, newLineNum: 1, oldLineNumber: 1, newLineNumber: 1 },
+          { lineType: "del", kind: "delete", text: "-const legacy = false;", content: "-const legacy = false;", oldLineNum: 2, newLineNum: null, oldLineNumber: 2, newLineNumber: null },
+          { lineType: "add", kind: "add", text: "+const nexus2027 = true;", content: "+const nexus2027 = true;", oldLineNum: null, newLineNum: 2, oldLineNumber: null, newLineNumber: 2 },
+          { lineType: "add", kind: "add", text: "+const highThroughput = true;", content: "+const highThroughput = true;", oldLineNum: null, newLineNum: 3, oldLineNumber: null, newLineNumber: 3 },
+          { lineType: "context", kind: "context", text: " export function run() {", content: " export function run() {", oldLineNum: 3, newLineNum: 4, oldLineNumber: 3, newLineNumber: 4 },
         ],
       } as unknown as T;
 
@@ -1754,9 +3034,9 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
           "NexusExplorer hybrid architecture combines high-performance Rust core with React 19 frontend.",
           "Full support for ReFS Copy-on-Write block cloning, instant zero-byte file duplicates.",
           "Forensic suite includes NTFS Alternate Data Streams, Process Unlocker, DoD shredder, and USN Journal.",
-          "Frontier 2027 features include AI Copilot, Dev Drive acceleration, and local P2P Mesh sharing.",
+          "Frontier 2027 features include Nexus AI Agent, Dev Drive acceleration, and local P2P Mesh sharing.",
         ],
-        keyTopics: ["Rust Core", "ReFS CoW", "Forensics", "AI Copilot", "Tauri v2"],
+        keyTopics: ["Rust Core", "ReFS CoW", "Forensics", "Nexus AI Agent", "Tauri v2"],
         outline: [
           { title: "Architecture Overview", level: 1, lineNumber: 5 },
           { title: "Storage Engine & CoW", level: 2, lineNumber: 42 },
@@ -1775,6 +3055,7 @@ export async function mockDispatch<T>(cmd: string, args?: Record<string, unknown
       } as unknown as T;
 
     case "tools_semantic_search":
+    case "tools_semantic_hybrid_search":
       return [
         {
           path: "D:\\code\\Main_projects\\NexusExplorer\\src\\lib\\ipc.ts",

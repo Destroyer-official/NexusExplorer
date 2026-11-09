@@ -44,8 +44,7 @@ pub fn list_flat_branch(
     }
     let limit = max_entries.unwrap_or(100_000).max(1);
 
-    let mut walker = jwalk::WalkDir::new(root)
-        .skip_hidden(false)
+    let mut walker = walkdir::WalkDir::new(root)
         .min_depth(1);
     if let Some(depth) = max_depth {
         if depth > 0 {
@@ -73,7 +72,7 @@ pub fn list_flat_branch(
             .unwrap_or_default();
         let relative = path
             .strip_prefix(root)
-            .unwrap_or(&path)
+            .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
         let depth = relative.matches('/').count() + 1;

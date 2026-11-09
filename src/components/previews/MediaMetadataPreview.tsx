@@ -94,11 +94,13 @@ export function MediaMetadataPreview({ filePath }: MediaMetadataPreviewProps) {
         <div className="flex items-center gap-2">
           {meta.kind === "image" ? (
             <Camera className="h-4 w-4 text-sky-400" />
-          ) : (
+          ) : meta.kind === "audio" ? (
             <Music className="h-4 w-4 text-emerald-400" />
+          ) : (
+            <Sparkles className="h-4 w-4 text-cyan-400" />
           )}
           <span className="font-semibold text-slate-200 capitalize">
-            {meta.kind} Metadata ({meta.format.toUpperCase()})
+            {meta.kind === "unknown" ? "File" : meta.kind} Metadata ({meta.format.toUpperCase()})
           </span>
         </div>
         <span className="text-[10px] text-slate-400 font-mono">{formatBytes(meta.fileSize)}</span>
@@ -243,6 +245,26 @@ export function MediaMetadataPreview({ filePath }: MediaMetadataPreviewProps) {
               <Save className="h-3.5 w-3.5" />
               {saving ? "Writing Tags..." : "Save ID3 Tags to File"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {meta.kind !== "image" && meta.kind !== "audio" && (
+        <div className="space-y-3">
+          <div className="p-3 rounded bg-slate-800/60 border border-slate-700/40 space-y-2">
+            <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">File Metadata & Attributes</div>
+            <div className="flex justify-between py-1 border-b border-slate-700/30">
+              <span className="text-slate-400">Path</span>
+              <span className="text-slate-200 font-mono text-right max-w-[180px] truncate" title={filePath}>{filePath}</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-slate-700/30">
+              <span className="text-slate-400">Format</span>
+              <span className="text-slate-200 uppercase font-semibold">{meta.format || "Standard"}</span>
+            </div>
+            <div className="flex justify-between py-1">
+              <span className="text-slate-400">Size</span>
+              <span className="text-slate-200">{formatBytes(meta.fileSize)}</span>
+            </div>
           </div>
         </div>
       )}

@@ -63,7 +63,7 @@ export function VirtualMounterModal({ isOpen, onClose, initialSource }: Props) {
   return (
     <div className="palette-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
       <div
-        className="palette"
+        className="palette" role="dialog" aria-modal="true" aria-label="Virtual drives"
         onClick={(e) => e.stopPropagation()}
         style={{ width: 650, maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
@@ -82,7 +82,7 @@ export function VirtualMounterModal({ isOpen, onClose, initialSource }: Props) {
             <button className="icon-btn" onClick={fetchMounts} title="Refresh">
               <RefreshCw size={14} />
             </button>
-            <button className="icon-btn" onClick={onClose}>
+            <button className="icon-btn" aria-label="Close virtual drives" onClick={onClose}>
               <X size={16} />
             </button>
           </div>

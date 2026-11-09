@@ -66,7 +66,7 @@ impl WatchManager {
         )
         .map_err(|e| e.to_string())?;
         debouncer
-            .watch(Path::new(&path), RecursiveMode::Recursive)
+            .watch(Path::new(&path), RecursiveMode::NonRecursive)
             .map_err(|e| e.to_string())?;
         watchers.insert(key, debouncer);
         Ok(())

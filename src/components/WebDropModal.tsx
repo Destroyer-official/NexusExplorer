@@ -59,10 +59,17 @@ export function WebDropModal({ isOpen, onClose, filesToShare = [] }: Props) {
 
   if (!isOpen) return null;
 
+  const portablePhones = store.drives.filter(
+    (d) => d.driveType === "portable" || d.path.startsWith("wpd://")
+  );
+  const targetDevices = portablePhones.length > 0
+    ? portablePhones
+    : store.drives.filter((d) => d.isUsb);
+
   return (
     <div className="palette-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
       <div
-        className="palette"
+        className="palette" role="dialog" aria-modal="true" aria-label="Share with QR code"
         onClick={(e) => e.stopPropagation()}
         style={{ width: 640, maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
@@ -73,22 +80,85 @@ export function WebDropModal({ isOpen, onClose, filesToShare = [] }: Props) {
               <Smartphone size={18} style={{ color: "#a855f7" }} />
             </div>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>Mobile QR-Code AirDrop / Direct WebDrop</div>
-              <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Instant zero-install Wi-Fi transfers to iPhone & Android</div>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Mobile Transfers & Direct WebDrop</div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Instant USB push or zero-install Wi-Fi portal for iPhone & Android</div>
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button className="icon-btn" onClick={fetchStatus} title="Refresh">
               <RefreshCw size={14} />
             </button>
-            <button className="icon-btn" onClick={onClose}>
+            <button className="icon-btn" aria-label="Close share with qr code" onClick={onClose}>
               <X size={16} />
             </button>
           </div>
         </div>
 
         {/* Content */}
-        <div style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ padding: 20, overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Direct USB Connected Device Quick-Push Banner */}
+          {targetDevices.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {targetDevices.map((dev) => (
+                <div
+                  key={dev.path}
+                  style={{
+                    background: "rgba(16, 185, 129, 0.08)",
+                    border: "1px solid rgba(16, 185, 129, 0.3)",
+                    borderRadius: "var(--radius-md)",
+                    padding: "12px 14px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Smartphone size={22} style={{ color: "#10b981", flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                        Connected {dev.driveType === "portable" ? "Smartphone" : "USB Device"}: {dev.label || dev.path}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                        Direct high-speed MTP/USB transfer ({formatBytes(dev.freeBytes)} free)
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      background: "#10b981",
+                      borderColor: "#059669",
+                      color: "#fff",
+                      fontWeight: 600,
+                      flexShrink: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    onClick={() => {
+                      const dest = `${dev.path}/Download`;
+                      const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+                      const targets = filesToShare.length > 0
+                        ? filesToShare
+                        : activeTab?.selected.length
+                          ? activeTab.selected
+                          : store.stagingPaths;
+                      if (targets.length > 0) {
+                        void store.startCopy(targets, dest);
+                        store.pushToast("success", "Sending to Phone", `Transferring ${targets.length} item(s) to ${dev.label || "Phone"}/Download`);
+                        onClose();
+                      } else {
+                        store.pushToast("warning", "No Files Selected", "Select files in the explorer or staging shelf first.");
+                      }
+                    }}
+                  >
+                    <Download size={13} /> Push to Phone
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {status?.isActive ? (
             <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
               {/* Dynamic QR SVG */}

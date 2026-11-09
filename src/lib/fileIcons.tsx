@@ -1,3 +1,5 @@
+import { forwardRef } from "react";
+import { iconAssets } from "./iconAssets";
 /** Extension-aware icon system with a consistent visual vocabulary. */
 
 import {
@@ -65,7 +67,7 @@ const DATABASE = new Set(["db", "sqlite", "sqlite3", "mdb", "accdb", "sql", "dbf
 const FONT = new Set(["ttf", "otf", "woff", "woff2", "eot"]);
 const THREED = new Set(["obj", "fbx", "blend", "stl", "gltf", "glb", "dae", "3ds"]);
 
-export function iconForEntry(entry: Pick<FileEntry, "ext" | "isDir" | "name">, open = false): IconSpec {
+function fallbackIconForEntry(entry: Pick<FileEntry, "ext" | "isDir" | "name">, open = false): IconSpec {
   if (entry.isDir) {
     const lower = entry.name.toLowerCase();
     if (lower === ".git" || lower.endsWith(".git")) return { Icon: FolderGit2, tone: "config" };
@@ -137,4 +139,29 @@ export function DriveGlyph({
 
 export function folderGlyph(size = 16) {
   return <Folder size={size} strokeWidth={1.7} />;
+}
+// Embed the project artwork so newly opened folders also render offline.
+const artwork = import.meta.glob<string>("../../resources/icons/filetypes/*.svg", { eager: true, query: "?inline", import: "default" });
+const assetIcons = new Map<string, LucideIcon>();
+const extensionIcons: Record<string, string> = { rs: "rust", py: "python", js: "javascript", ts: "typescript", tsx: "react", jsx: "react", md: "markdown", ps1: "powershell", doc: "word", docx: "word", xls: "excel", xlsx: "excel", png: "image", jpg: "image", jpeg: "image", gif: "image" };
+export function iconAssetForEntry(entry: Pick<FileEntry, "ext" | "isDir" | "name">): string | null {
+  const ext = entry.ext.toLowerCase().replace(/^\./, "");
+  const candidate = entry.isDir ? "folder-" + entry.name.toLowerCase().replace(/^\./, "") : extensionIcons[ext] ?? ext;
+  const asset = iconAssets.has(candidate) ? candidate : entry.isDir ? "folder-base" : null;
+  return asset ? "/icons/filetypes/" + asset + ".svg" : null;
+}
+export function iconForEntry(entry: Pick<FileEntry, "ext" | "isDir" | "name">, open = false): IconSpec {
+  const fallback = fallbackIconForEntry(entry, open);
+  const src = iconAssetForEntry(entry);
+  if (!src) return fallback;
+  const url = artwork["../../resources" + src];
+  if (!url) return fallback;
+  let Icon = assetIcons.get(src);
+  if (!Icon) {
+    Icon = forwardRef<SVGSVGElement, import("lucide-react").LucideProps>(function AssetIcon({ size = 18, className, style }, _ref) {
+      return <img src={url} width={size} height={size} className={className} style={{ objectFit: "contain", ...style }} alt="" aria-hidden="true" draggable={false} />;
+    });
+    assetIcons.set(src, Icon);
+  }
+  return { ...fallback, Icon };
 }

@@ -11,10 +11,11 @@ export function FaytBar() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (store.settings.faytEnabled === false) return;
+      const current = useAppStore.getState();
+      if (current.settings.faytEnabled === false || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || document.querySelector(".overlay, .palette-overlay")) return;
       // Ignore if user is already typing in an input/textarea
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea") return;
+      if (tag === "input" || tag === "textarea" || tag === "select" || (e.target instanceof HTMLElement && e.target.isContentEditable)) return;
 
       if (e.key === "'" || e.key === "/") {
         e.preventDefault();
@@ -57,17 +58,14 @@ export function FaytBar() {
     if (!query.trim()) return;
 
     if (mode === "command") {
-      const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
-      const cwd = activeTab?.path ?? "C:\\";
-      try {
-        await store.openTerminal(cwd);
-        setIsOpen(false);
-      } catch (err: any) {
-        store.pushToast("error", "Command Failed", err?.message || String(err));
-      }
+      useAppStore.setState({ terminalDraft: query, terminalOpen: true });
+      setIsOpen(false);
     } else if (mode === "global") {
       store.openSearch();
+      void store.runSearch(query);
       setIsOpen(false);
+    } else if (mode === "filter") {
+      store.setQuickFilter(query);
     } else if (mode === "jump") {
       const fav = store.bookmarks.find((b) => b.name.toLowerCase().includes(query.toLowerCase()));
       if (fav) {
@@ -97,9 +95,9 @@ export function FaytBar() {
       case "filter":
         return "FAYT: Instant live filter in current folder... (Esc to dismiss)";
       case "global":
-        return "FAYT: Global fast search... (Enter to run)";
+        return "Search this folder and subfolders... (Enter to run)";
       case "command":
-        return "FAYT: Run PowerShell command in current folder...";
+        return "Prepare a terminal command (Enter to review)...";
       case "jump":
         return "FAYT: Jump to favorite bookmark by name...";
     }
@@ -115,12 +113,13 @@ export function FaytBar() {
         display: "flex",
         alignItems: "center",
         gap: 8,
-        background: "var(--surface)",
+        background: "var(--bg-2)",
         padding: "6px 12px",
         borderRadius: "var(--radius-sm)",
         boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
         border: "1px solid var(--accent)",
-        minWidth: 360,
+        width: "min(460px, calc(100vw - 32px))",
+        maxWidth: "calc(100vw - 32px)",
       }}
     >
       {getPrefixIcon()}
@@ -128,10 +127,10 @@ export function FaytBar() {
         ref={inputRef}
         type="text"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => { setQuery(e.target.value); if (mode === "filter") store.setQuickFilter(e.target.value); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") handleExecute();
-          if (e.key === "Escape") setIsOpen(false);
+          if (e.key === "Escape") { e.stopPropagation(); if (mode === "filter") store.setQuickFilter(""); setIsOpen(false); }
         }}
         placeholder={getPlaceholder()}
         style={{
@@ -155,7 +154,7 @@ export function FaytBar() {
         <button
           className="icon-btn"
           style={{ width: 20, height: 20 }}
-          onClick={() => setIsOpen(false)}
+          onClick={() => { if (mode === "filter") store.setQuickFilter(""); setIsOpen(false); }}
           title="Dismiss"
         >
           <X size={12} />

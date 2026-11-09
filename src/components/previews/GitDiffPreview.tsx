@@ -104,9 +104,11 @@ export default function GitDiffPreview({ filePath, repoRoot }: GitDiffPreviewPro
           }}
         >
           {diff.lines.map((ln, idx) => {
-            const isAdd = ln.lineType === "add";
-            const isDel = ln.lineType === "del";
-            const isHeader = ln.lineType === "header";
+            const rawType = ln.lineType ?? (ln as any).kind ?? "context";
+            const isAdd = rawType === "add";
+            const isDel = rawType === "del" || rawType === "delete";
+            const isHeader = rawType === "header";
+            const text = ln.text ?? (ln as any).content ?? "";
 
             const bg = isAdd
               ? "rgba(34, 197, 94, 0.12)"
@@ -146,12 +148,12 @@ export default function GitDiffPreview({ filePath, repoRoot }: GitDiffPreviewPro
                     marginRight: 8,
                   }}
                 >
-                  {ln.newLineNum ?? ln.oldLineNum ?? ""}
+                  {ln.newLineNum ?? (ln as any).newLineNumber ?? ln.oldLineNum ?? (ln as any).oldLineNumber ?? ""}
                 </span>
                 <span style={{ width: 14, userSelect: "none", fontWeight: 700 }}>
                   {isAdd ? "+" : isDel ? "-" : " "}
                 </span>
-                <span style={{ flex: 1 }}>{ln.text}</span>
+                <span style={{ flex: 1 }}>{text}</span>
               </div>
             );
           })}

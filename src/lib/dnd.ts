@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { isWithin, samePath } from "@/lib/paths";
+import { isWithin, samePath, dirname } from "@/lib/paths";
 import { useAppStore } from "@/state/store";
 
 export interface DragSnapshot { active: boolean; paths: string[]; x: number; y: number; }
@@ -16,7 +16,7 @@ function dropTargetAt(x: number, y: number): HTMLElement | null {
   const bucketEl = el.closest("[data-drop-bucket]") as HTMLElement | null;
   if (bucketEl) return bucketEl;
   // Check for staging widget target
-  const stagingEl = el.closest("[data-drop-target='staging'], .staging-widget") as HTMLElement | null;
+  const stagingEl = el.closest("[data-drop-target='staging'], .staging-widget, .shelf-list") as HTMLElement | null;
   if (stagingEl) return stagingEl;
   // Check for preview pane target
   const previewEl = el.closest("[data-drop-target='preview'], .preview") as HTMLElement | null;
@@ -27,11 +27,30 @@ function dropTargetAt(x: number, y: number): HTMLElement | null {
 function clearHover() { if (hoverEl) { hoverEl.classList.remove("drop-hover"); hoverEl = null; } }
 
 if (typeof window !== "undefined") {
+  const cancel = () => {
+    pending = null;
+    snapshot = { active: false, paths: [], x: 0, y: 0 };
+    document.body.classList.remove("dragging-files");
+    clearHover();
+    emit();
+  };
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && (snapshot.active || pending)) cancel();
+  });
+  // Do not let background gesture cancel active file drag
+  window.addEventListener("pointercancel", () => {
+    if (!snapshot.active) pending = null;
+  });
+  window.addEventListener("dragstart", (e) => {
+    if (snapshot.active || pending) {
+      e.preventDefault();
+    }
+  });
   window.addEventListener("pointermove", (e) => {
     if (pending && !snapshot.active) {
       const dx = e.clientX - pending.startX;
       const dy = e.clientY - pending.startY;
-      // 100 = 10px threshold, preventing accidental drag initiation during double clicks
+      // 100 = 10px threshold prevents micro-drifts from hijacking single-clicks
       if (dx * dx + dy * dy > 100) {
         snapshot = { active: true, paths: pending.paths, x: e.clientX, y: e.clientY };
         document.body.classList.add("dragging-files");
@@ -59,8 +78,8 @@ if (typeof window !== "undefined") {
 
       if (target) {
         const bucket = target.dataset.dropBucket || target.closest("[data-drop-bucket]")?.getAttribute("data-drop-bucket");
-        const isStaging = target.dataset.dropTarget === "staging" || !!target.closest(".staging-widget");
-        const isPreview = target.dataset.dropTarget === "preview" || !!target.closest(".preview");
+        const isStaging = target.dataset.dropTarget === "staging" || !!target.closest("[data-drop-target='staging'], .staging-widget, .shelf-list");
+        const isPreview = !bucket && !isStaging && (target.dataset.dropTarget === "preview" || !!target.closest(".preview"));
         const dest = target.dataset.dropPath || target.closest("[data-drop-path]")?.getAttribute("data-drop-path");
 
         if (bucket) {
@@ -70,6 +89,7 @@ if (typeof window !== "undefined") {
           } else if (bucket === "archive") {
             const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
             const parentDir = activeTab?.path ?? "C:\\";
+            store.addStaged(paths);
             void store.pasteStagedAs("zip", parentDir);
             store.pushToast("info", "Archiving", `Creating ZIP archive for ${paths.length} item${paths.length > 1 ? "s" : ""}…`);
           } else if (bucket === "trash") {
@@ -79,15 +99,31 @@ if (typeof window !== "undefined") {
             store.setWebdropOpen(true);
             store.pushToast("info", "WebDrop", `Ready to send ${paths.length} item${paths.length > 1 ? "s" : ""} to mobile`);
           }
-        } else if (isStaging || isPreview) {
+        } else if (isStaging) {
           store.addStaged(paths);
           store.pushToast("success", "Staged", `Added ${paths.length} item${paths.length > 1 ? "s" : ""} to Staging Shelf`);
           if (paths.length === 1) {
             store.selectOnly(paths[0]);
           }
+        } else if (isPreview) {
+          window.dispatchEvent(new CustomEvent("nexus:preview-path", { detail: paths[0] }));
         } else if (dest) {
           const sources = paths.filter((p) => !samePath(p, dest) && !isWithin(dest, p));
-          if (sources.length) void store.startMove(sources, dest);
+          if (sources.length) {
+            const srcDrive = sources[0]?.slice(0, 2).toLowerCase();
+            const dstDrive = dest.slice(0, 2).toLowerCase();
+            const isSameParent = sources.every((p) => samePath(dirname(p), dest));
+            const isCopy = e.ctrlKey || (!e.shiftKey && srcDrive !== dstDrive);
+
+            if (isSameParent && !isCopy) {
+              // Dropping back into the exact same folder without Ctrl is a no-op!
+              // Don't trigger a move that causes "File Conflict Detected" or fake transfers!
+            } else if (isCopy) {
+              void store.startCopy(sources, dest);
+            } else {
+              void store.startMove(sources, dest);
+            }
+          }
         }
       }
       snapshot = { active: false, paths: [], x: 0, y: 0 };

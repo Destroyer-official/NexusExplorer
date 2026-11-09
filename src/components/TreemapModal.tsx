@@ -49,7 +49,7 @@ export default function TreemapModal({ initialPath, onClose }: TreemapModalProps
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal-card"
+        className="modal-card" role="dialog" aria-modal="true" aria-label="Disk space"
         style={{ width: 940, maxWidth: "96vw", height: 680, display: "flex", flexDirection: "column" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -65,7 +65,7 @@ export default function TreemapModal({ initialPath, onClose }: TreemapModalProps
               {formatBytes(analysis.totalBytes)} ({analysis.fileCount.toLocaleString()} files, {analysis.dirCount.toLocaleString()} folders)
             </span>
           )}
-          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+          <button className="icon-btn" aria-label="Close disk space" onClick={onClose}><X size={16} /></button>
         </div>
 
         {/* Toolbar & Category Legend */}

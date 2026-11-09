@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as React from "react";
 import { useAppStore } from "@/state/store";
-import { FolderOpen, Copy, Scissors, ClipboardPaste, Pencil, Trash2, Info, Star, RefreshCw, Eye, Terminal, ExternalLink, Hash, HardDrive, LayoutGrid, File } from "lucide-react";
+import { FolderOpen, Copy, Scissors, ClipboardPaste, Pencil, Trash2, Info, Star, RefreshCw, Eye, Terminal, ExternalLink, Hash, HardDrive, LayoutGrid, File, Sparkles } from "lucide-react";
 
 export default function ContextMenu() {
   const store = useAppStore();
@@ -60,7 +60,7 @@ function IconGlyph({ name }: { name: string }) {
     open: FolderOpen, copy: Copy, cut: Scissors, paste: ClipboardPaste, rename: Pencil,
     delete: Trash2, permanent: Trash2, info: Info, star: Star, refresh: RefreshCw,
     reveal: ExternalLink, terminal: Terminal, hash: Hash, newfolder: FolderOpen, newfile: File,
-    preview: Eye, sort: LayoutGrid, view: LayoutGrid, newtab: FolderOpen, size: HardDrive,
+    preview: Eye, sort: LayoutGrid, view: LayoutGrid, newtab: FolderOpen, size: HardDrive, sparkles: Sparkles,
   };
   const Icon = map[name];
   return Icon ? <Icon size={14} /> : null;

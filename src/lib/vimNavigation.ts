@@ -1,21 +1,23 @@
 /** Vim-Modal Keyboard Navigation Engine (h/j/k/l, v, y, d, p, gg, G). */
 
 import { useAppStore, cutClipboard } from "@/state/store";
+import { visibleEntries } from "@/lib/entries";
 
 let lastKey = "";
 let lastKeyTime = 0;
 
 export function handleVimKeyEvent(e: KeyboardEvent): boolean {
   // Ignore inside text input elements
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || document.querySelector(".overlay, .palette-overlay, .modal-backdrop, [aria-modal=true]")) return false;
   const target = e.target as HTMLElement | null;
   const tag = target?.tagName?.toLowerCase();
-  if (tag === "input" || tag === "textarea") return false;
+  if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable || target?.closest("button")) return false;
 
   const store = useAppStore.getState();
   const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
   if (!activeTab || activeTab.entries.length === 0) return false;
 
-  const entries = activeTab.entries;
+  const entries = visibleEntries(activeTab, store.settings, store.folderSizes);
   const selectedPaths = activeTab.selected;
   const currentIdx = selectedPaths.length > 0
     ? entries.findIndex((en) => en.path === selectedPaths[selectedPaths.length - 1])

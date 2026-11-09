@@ -6,7 +6,7 @@ import { useSystemEvents } from "@/hooks/useSystemEvents";
 import QuickLookDialog from "@/components/QuickLookDialog";
 import DragGhost from "@/components/DragGhost";
 import TitleBar from "@/components/TitleBar";
-import TabStrip from "@/components/TabStrip";
+import WindowFrame from "@/components/WindowFrame";
 import Toolbar from "@/components/Toolbar";
 import Workspace from "@/components/Workspace";
 import StatusBar from "@/components/StatusBar";
@@ -42,7 +42,13 @@ import { ClipboardHistoryModal } from "@/components/ClipboardHistoryModal";
 import { TimeMachineBar } from "@/components/TimeMachineBar";
 import { PropertiesModal } from "@/components/PropertiesModal";
 import HexEditorModal from "@/components/HexEditorModal";
+import { SelectPatternModal } from "@/components/SelectPatternModal";
+import { TabSearchModal } from "@/components/TabSearchModal";
+import { CreateArchiveModal } from "@/components/CreateArchiveModal";
+import { GoToFolderModal } from "@/components/GoToFolderModal";
+import { FileCompareModal } from "@/components/FileCompareModal";
 import { WorkspaceProfilesModal } from "@/components/WorkspaceProfilesModal";
+import { UsbDeviceManagerModal } from "@/components/UsbDeviceManagerModal";
 import { initGamepadListener } from "@/lib/gamepad";
 
 export default function App() {
@@ -92,6 +98,11 @@ export default function App() {
   const setHexEditorPath = useAppStore((s) => s.setHexEditorPath);
   const workspaceProfilesOpen = useAppStore((s) => s.workspaceProfilesOpen);
   const setWorkspaceProfilesOpen = useAppStore((s) => s.setWorkspaceProfilesOpen);
+  const selectPatternOpen = useAppStore((s) => s.selectPatternOpen);
+  const tabSearchOpen = useAppStore((s) => s.tabSearchOpen);
+  const createArchivePaths = useAppStore((s) => s.createArchivePaths);
+  const goToFolderOpen = useAppStore((s) => s.goToFolderOpen);
+  const compareModalOpen = useAppStore((s) => s.compareModalOpen);
 
   const activeTab = useAppStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
   const closeCopilot = useAppStore((s) => s.closeCopilot);
@@ -123,7 +134,50 @@ export default function App() {
               const store = useAppStore.getState();
               const x = (payload.position?.x ?? 0) / window.devicePixelRatio;
               const y = (payload.position?.y ?? 0) / window.devicePixelRatio;
-              const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-path]");
+              const hit = document.elementFromPoint(x, y);
+
+              // 1. Check for quick drop target buckets first
+              const bucketEl = hit?.closest<HTMLElement>("[data-drop-bucket]");
+              if (bucketEl) {
+                const bucket = bucketEl.dataset.dropBucket;
+                if (bucket === "shelf") {
+                  store.addStaged(payload.paths);
+                  store.pushToast("success", "Staged", `Added ${payload.paths.length} item(s) to shelf`);
+                  return;
+                }
+                if (bucket === "archive") {
+                  const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+                  store.addStaged(payload.paths);
+                  void store.pasteStagedAs("zip", activeTab?.path ?? "C:\\");
+                  store.pushToast("info", "Archiving", `Creating ZIP archive for ${payload.paths.length} item(s)…`);
+                  return;
+                }
+                if (bucket === "trash") {
+                  void store.startDelete(payload.paths, false);
+                  return;
+                }
+                if (bucket === "webdrop") {
+                  store.addStaged(payload.paths);
+                  store.setWebdropOpen(true);
+                  return;
+                }
+              }
+
+              // 2. Check for staging widget target
+              if (hit?.closest("[data-drop-target=staging], .staging-widget, .shelf-list")) {
+                store.addStaged(payload.paths);
+                store.pushToast("success", "Staged", `Added ${payload.paths.length} item(s) to shelf`);
+                return;
+              }
+
+              // 3. Check for dedicated preview target
+              if (hit?.closest("[data-drop-target=preview], .preview-stage")) {
+                window.dispatchEvent(new CustomEvent("nexus:preview-path", { detail: payload.paths[0] }));
+                return;
+              }
+
+              // 4. Standard folder / navigation drop path
+              const el = hit?.closest<HTMLElement>("[data-drop-path]");
               const dest = el?.dataset.dropPath ?? store.tabs.find((t) => t.id === store.activeTabId)?.path;
               if (dest) void store.startCopy(payload.paths, dest);
             }
@@ -140,9 +194,9 @@ export default function App() {
     return (
       <div className="app" style={{ alignItems: "center", justifyContent: "center" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-          <div className="brand-mark" style={{ width: 48, height: 48, fontSize: 22 }}>N</div>
+          <img className="startup-logo" src="/nexus-logo.png" alt="NexusExplorer" />
           <div style={{ fontSize: 18, fontWeight: 600 }}>Nexus Explorer</div>
-          <div style={{ color: "var(--text-faint)", fontSize: 13 }}>Booting Rust engine…</div>
+          <div style={{ color: "var(--text-faint)", fontSize: 13 }}>{isTauri() ? "Starting desktop…" : "Loading browser preview…"}</div>
         </div>
       </div>
     );
@@ -163,9 +217,8 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <WindowFrame>
       <TitleBar />
-      <TabStrip />
       <Toolbar />
       <Workspace />
       <TerminalDock />
@@ -182,8 +235,8 @@ export default function App() {
       {conflict && <ConflictDialog />}
       {prompt && <PromptDialog />}
       {confirm && <ConfirmDialog />}
-  {batchRenameOpen && <BatchRenameDialog />}
-  {quickLookOpen && <QuickLookDialog />}
+      {batchRenameOpen && <BatchRenameDialog />}
+      {quickLookOpen && <QuickLookDialog />}
       {contextMenu && <ContextMenu />}
       <Toasts toasts={toasts} />
       <DragGhost />
@@ -312,6 +365,14 @@ export default function App() {
           onClose={() => setHexEditorPath(null)}
         />
       )}
-    </div>
+
+      {selectPatternOpen && <SelectPatternModal />}
+      {tabSearchOpen && <TabSearchModal />}
+      {createArchivePaths && <CreateArchiveModal />}
+      {goToFolderOpen && <GoToFolderModal />}
+      {compareModalOpen && <FileCompareModal />}
+
+      <UsbDeviceManagerModal />
+    </WindowFrame>
   );
 }

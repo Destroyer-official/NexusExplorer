@@ -94,4 +94,47 @@ describe("useAppStore", () => {
     store.closePrompt();
     expect(useAppStore.getState().prompt).toBeNull();
   });
+
+  it("renames tabs, closes other tabs, and closes tabs to the right", async () => {
+    await useAppStore.getState().boot();
+    const store = useAppStore.getState();
+    const tab0 = store.tabs[0];
+    expect(tab0).toBeDefined();
+
+    // Test renameTab
+    store.renameTab(tab0.id, "Custom Project");
+    expect(useAppStore.getState().tabs.find((t) => t.id === tab0.id)?.title).toBe("Custom Project");
+
+    // Open additional tabs
+    await store.openTab("C:\\Windows", false, false);
+    await store.openTab("C:\\Users", false, false);
+    await store.openTab("C:\\Program Files", false, false);
+    expect(useAppStore.getState().tabs.length).toBeGreaterThanOrEqual(4);
+
+    const tabsAfterOpen = useAppStore.getState().tabs;
+    const secondTab = tabsAfterOpen[1];
+
+    // Close tabs to right of second tab
+    useAppStore.getState().closeTabsToRight(secondTab.id);
+    expect(useAppStore.getState().tabs.length).toBe(2);
+    expect(useAppStore.getState().tabs[0].id).toBe(tabsAfterOpen[0].id);
+    expect(useAppStore.getState().tabs[1].id).toBe(secondTab.id);
+
+    // Close other tabs
+    useAppStore.getState().closeOtherTabs(secondTab.id);
+    expect(useAppStore.getState().tabs.length).toBe(1);
+    expect(useAppStore.getState().tabs[0].id).toBe(secondTab.id);
+  });
+});
+
+it("creates a distinct tab when New tab requests an already open folder", async () => {
+  await useAppStore.getState().boot();
+  const before = useAppStore.getState();
+  const path = before.tabs[0].path;
+  const count = before.tabs.length;
+  await before.openTab(path, true, false);
+  const after = useAppStore.getState();
+  expect(after.tabs).toHaveLength(count + 1);
+  expect(after.activeTabId).not.toBe(before.tabs[0].id);
+  expect(after.tabs.find((tab) => tab.id === after.activeTabId)?.path).toBe(path);
 });

@@ -28,6 +28,12 @@ pub struct DriveInfo {
     pub free_bytes: u64,
     pub total_bytes: u64,
     pub is_ready: bool,
+    #[serde(default)]
+    pub is_usb: bool,
+    #[serde(default)]
+    pub usb_speed: Option<String>,
+    #[serde(default)]
+    pub is_degraded_port: bool,
 }
 
 /// Identifies a started directory scan and the root it covers.

@@ -142,6 +142,18 @@ pub async fn cancel_job(
     Ok(control.snapshot(&job_id))
 }
 
+/// Sets token-bucket I/O rate limit in bytes per second (0 = uncapped).
+#[tauri::command]
+pub async fn set_rate_limit(
+    job_id: String,
+    rate_limit_bps: u64,
+    jobs: State<'_, JobManager>,
+) -> Result<(), String> {
+    let control = control_or_err(&jobs, &job_id)?;
+    control.rate_limit_bps.store(rate_limit_bps, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}
+
 /// Delivers a conflict resolution to a waiting transfer.
 #[tauri::command]
 pub async fn resolve_conflict(

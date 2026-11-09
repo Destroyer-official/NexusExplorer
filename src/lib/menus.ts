@@ -18,12 +18,17 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
         if (e) void store.openEntry(e);
       });
     } },
+    ...(!multi ? [{ label: "Quick Look Preview", icon: "preview" as const, shortcut: "Space", action: () => store.setQuickLookOpen(true) }] : []),
     ...(!multi ? [{ label: "Open in new tab", icon: "newtab" as const, action: () => void store.openTab(first, true) }] : []),
     { label: "Open in terminal", icon: "terminal", action: () => void store.openTerminal(multi ? targetDir : (store.tabs.find((t) => t.id === store.activeTabId)?.entries.find((e) => e.path === first)?.isDir ? first : targetDir)) },
     { label: "Reveal in Explorer", icon: "reveal", action: () => void ipc.revealInShell(first).catch((e) => store.pushToast("error", "Reveal failed", toErrorMessage(e))) },
     { separator: true },
     { label: "Copy", icon: "copy", shortcut: "Ctrl+C", action: () => store.copySelection(false) },
     { label: "Cut", icon: "cut", shortcut: "Ctrl+X", action: () => store.copySelection(true) },
+    { label: "Copy Full Path", icon: "copy" as const, shortcut: "Ctrl+Alt+C", action: () => {
+      void navigator.clipboard.writeText(first);
+      store.pushToast("info", "Path Copied", first);
+    } },
     { label: "Paste into folder", icon: "paste", shortcut: "Ctrl+V", action: () => void store.pasteInto(targetDir) },
     { separator: true },
     ...(!multi ? [{ label: "Rename", icon: "rename" as const, shortcut: "F2", action: () => store.setRenaming(first) }] : []),
@@ -50,7 +55,7 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
       action: () => {
         store.openConfirm({
           title: "Permanent DoD 5220.22-M Shredding",
-          description: `Are you sure you want to permanently shred ${selectedPaths.length} item(s)? Data will be overwritten with 3 cryptographic passes and cannot be recovered by any forensic tool.`,
+          description: `Are you sure you want to permanently shred ${selectedPaths.length} item(s)? Data will be overwritten with 3 cryptographic passes and deleted.\n\nAdvisory: On SSDs (due to Flash Translation Layer wear-leveling) and CoW filesystems (ReFS/Btrfs), full-volume encryption (BitLocker) provides the highest sanitization guarantee.`,
           confirmLabel: "Destroy Permanently",
           danger: true,
           onConfirm: async () => {
@@ -64,6 +69,11 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
           }
         });
       }
+    },
+    {
+      label: "NIST SP 800-88 Sanitizer & Certifier...",
+      icon: "permanent" as const,
+      action: () => store.setPowerTools(true, "shredder"),
     },
     ...(!multi && first.toLowerCase().endsWith(".nxvault") ? [{
       label: "Decrypt Secure Vault...",
@@ -136,6 +146,11 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
       icon: "refresh" as const,
       action: () => store.openGitHistory(first),
     }] : []),
+    ...(!multi ? [{
+      label: "Previous versions (VSS Snapshots)...",
+      icon: "info" as const,
+      action: () => store.setTimeMachineOpen(true),
+    }] : []),
     {
       label: multi ? `Share ${selectedPaths.length} items via Local P2P Mesh...` : "Share via Local P2P Mesh...",
       icon: "copy" as const,
@@ -162,14 +177,42 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
       action: () => store.setClipboardHistoryOpen(true),
     },
     {
-      label: "AI Copilot: Ask for Action (Ctrl+K)...",
-      icon: "terminal" as const,
+      label: "Nexus AI Agent (Ctrl+K)...",
+      icon: "sparkles" as const,
+      shortcut: "Ctrl+K",
       action: () => store.openCopilot(),
     },
     { label: multi ? `Delete ${selectedPaths.length} items` : "Delete", icon: "delete", shortcut: "Del", danger: true, action: () => void store.startDelete(selectedPaths, false) },
     { label: "Delete permanently", icon: "permanent", danger: true, action: () => void store.startDelete(selectedPaths, true) },
     { separator: true },
-    { label: "Copy path", icon: "copy", action: () => void store.copyText(selectedPaths.join("\n"), "Path copied") },
+    {
+      label: multi ? `New folder with selection (${selectedPaths.length} items)...` : "New folder with item...",
+      icon: "newfolder" as const,
+      action: () => {
+        store.openPrompt({
+          title: "New folder with selection",
+          description: `Create a new folder and move ${selectedPaths.length} selected item(s) into it.`,
+          label: "Folder name",
+          value: "New Folder",
+          confirmLabel: "Create & Move",
+          validate: (val) => (val.trim() ? null : "Enter a valid folder name"),
+          onConfirm: async (folderName) => {
+            const trimmed = folderName.trim();
+            const newFolderPath = `${targetDir}\\${trimmed}`;
+            try {
+              await ipc.createFolder(targetDir, trimmed, true);
+              await store.startMove(selectedPaths, newFolderPath);
+              store.pushToast("success", "Moved to New Folder", `Moved ${selectedPaths.length} item(s) into "${trimmed}"`);
+              await store.refreshActive();
+            } catch (err) {
+              store.pushToast("error", "Failed to create folder", toErrorMessage(err));
+            }
+          },
+        });
+      },
+    },
+    { label: "Copy path", icon: "copy", shortcut: "Ctrl+Shift+C", action: () => void store.copyText(selectedPaths.join("\n"), "Path copied") },
+    { label: "Copy filename", icon: "copy", action: () => void store.copyText(selectedPaths.map((p) => p.split(/[\\/]/).pop() || p).join("\n"), "Name copied") },
     { label: "Add to favorites", icon: "star", action: () => selectedPaths.forEach((p) => void store.addBookmark(p)) },
     {
       label: multi ? `Add ${selectedPaths.length} items to staging shelf` : "Add to staging shelf",
@@ -304,6 +347,11 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
             store.pushToast("error", "Archive creation failed", toErrorMessage(e));
           }
         }
+      },
+      {
+        label: "Compress with options...",
+        icon: "open" as const,
+        action: () => store.setCreateArchivePaths(selectedPaths),
       }
     ]),
     {
@@ -336,11 +384,28 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
           }
         }
       ] : []),
-      { label: "Hash (SHA-256)", icon: "hash" as const, action: async () => {
+      { label: "Hash & Copy SHA-256", icon: "hash" as const, action: async () => {
         try {
           const h = await ipc.hashFile(first, "sha256");
-          store.pushToast("success", "SHA-256", `${h.digest}  (${h.elapsedMs} ms)`);
+          await store.copyText(h.digest, `SHA-256 copied: ${h.digest.slice(0, 16)}...`);
         } catch (e) { store.pushToast("error", "Hash failed", toErrorMessage(e)); }
+      } },
+      { label: "Verify Hash with Clipboard...", icon: "hash" as const, action: async () => {
+        try {
+          const clip = (await navigator.clipboard.readText()).trim();
+          if (!clip) {
+            store.pushToast("info", "Clipboard Empty", "Copy a checksum to clipboard first to verify against.");
+            return;
+          }
+          const cleanClip = clip.toLowerCase().replace(/[^a-f0-9]/g, "");
+          const algo = cleanClip.length === 16 ? "xxh3" : cleanClip.length === 64 ? "sha256" : "sha256";
+          const h = await ipc.hashFile(first, algo);
+          if (cleanClip === h.digest.toLowerCase()) {
+            store.pushToast("success", "✓ Hash Match Verified!", `${algo.toUpperCase()}: ${h.digest.slice(0, 24)}... matches clipboard`);
+          } else {
+            store.pushToast("error", "✗ Hash Mismatch", `Computed: ${h.digest.slice(0, 16)}...\nExpected: ${cleanClip.slice(0, 16)}...`);
+          }
+        } catch (e) { store.pushToast("error", "Hash verification failed", toErrorMessage(e)); }
       } },
       ...(first.match(/\.(png|jpe?g|bmp|tiff|tif|webp|gif)$/i) ? [
         {
@@ -415,22 +480,17 @@ export function entryMenu(selectedPaths: string[], store: ReturnType<typeof useA
     ...(selectedPaths.length === 2 ? [{
       label: "Compare Files (Binary Diff)",
       icon: "info" as const,
-      action: async () => {
-        try {
-          const diff = await ipc.toolsCompareBinary(selectedPaths[0], selectedPaths[1], 20);
-          if (diff.isIdentical) {
-            store.pushToast("success", "Files are 100% Identical", "Binary match verified.");
-          } else {
-            store.pushToast("warning", `Binary Difference (${diff.matchingPercentage.toFixed(1)}% match)`, `${diff.totalDifferencesBytes} bytes differ.`);
-          }
-        } catch (e) { store.pushToast("error", "Compare failed", toErrorMessage(e)); }
-      }
+      shortcut: "Ctrl+Shift+E",
+      action: () => store.openCompareModal(selectedPaths[0], selectedPaths[1]),
     }] : []),
     ...(!multi ? [{
       label: "Open in Hex Editor",
       icon: "terminal" as const,
       action: () => store.setHexEditorPath(first),
     }] : []),
+    { separator: true },
+    { label: "Select by pattern...", icon: "info" as const, shortcut: "Ctrl+Shift+S", action: () => store.setSelectPatternOpen(true) },
+    { label: "Invert selection", icon: "refresh" as const, shortcut: "Ctrl+Shift+I", action: () => store.invertSelection() },
     { label: "Properties", icon: "info", shortcut: "Alt+Enter", action: () => store.setPropertiesPath(first) },
   ];
 }
@@ -441,6 +501,11 @@ export function backgroundMenu(path: string, store: ReturnType<typeof useAppStor
     { label: "New file", icon: "newfile", action: () => void store.createFile() },
     { separator: true },
     { label: "Paste", icon: "paste", shortcut: "Ctrl+V", action: () => void store.pasteInto(path) },
+    { label: "Copy Folder Path", icon: "copy", action: () => {
+      void navigator.clipboard.writeText(path);
+      store.pushToast("info", "Path Copied", path);
+    } },
+    { label: "Go to folder...", icon: "open" as const, shortcut: "Ctrl+G", action: () => store.setGoToFolderOpen(true) },
     { label: "Refresh", icon: "refresh", shortcut: "F5", action: () => void store.refreshActive() },
     { separator: true },
     { label: "Open in terminal", icon: "terminal", action: () => void store.openTerminal(path) },
@@ -478,6 +543,8 @@ export function backgroundMenu(path: string, store: ReturnType<typeof useAppStor
     { label: "Open docked terminal", icon: "terminal" as const, action: () => store.setTerminalOpen(true) },
     { separator: true },
     { label: "Select all", icon: "info", shortcut: "Ctrl+A", action: () => store.selectAll() },
+    { label: "Select by pattern...", icon: "info" as const, shortcut: "Ctrl+Shift+S", action: () => store.setSelectPatternOpen(true) },
+    { label: "Invert selection", icon: "refresh" as const, shortcut: "Ctrl+Shift+I", action: () => store.invertSelection() },
     { label: "Toggle hidden files", icon: "preview", action: () => void store.updateSettings({ showHidden: !store.settings.showHidden }) },
   ];
 }

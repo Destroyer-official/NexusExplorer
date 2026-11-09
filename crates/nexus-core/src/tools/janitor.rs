@@ -40,6 +40,23 @@ pub struct JanitorCleanResult {
     pub errors: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmptyDirsReport {
+    pub root_path: String,
+    pub empty_dirs: Vec<String>,
+    pub scanned_dirs: usize,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmptyDirsCleanResult {
+    pub removed_count: usize,
+    pub failed_count: usize,
+    pub errors: Vec<String>,
+}
+
 fn classify_artifact(dir_name: &str) -> Option<(&'static str, &'static str)> {
     match dir_name.to_lowercase().as_str() {
         "node_modules" => Some(("Node.js / Web", "node_modules")),
@@ -178,11 +195,147 @@ pub fn clean_developer_artifacts(paths: &[String]) -> JanitorCleanResult {
     }
 }
 
+fn find_empty_dirs_recursive(
+    dir: &Path,
+    max_results: usize,
+    results: &mut Vec<String>,
+    scanned: &mut usize,
+) -> bool {
+    *scanned += 1;
+    let read = match fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+
+    let mut is_empty = true;
+    let mut subdirs = Vec::new();
+
+    for entry in read.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        if name.starts_with(".git") {
+            is_empty = false;
+            continue;
+        }
+
+        if let Ok(file_type) = entry.file_type() {
+            if file_type.is_dir() {
+                subdirs.push(path);
+            } else {
+                is_empty = false;
+            }
+        } else {
+            is_empty = false;
+        }
+    }
+
+    for subdir in subdirs {
+        let child_empty = find_empty_dirs_recursive(&subdir, max_results, results, scanned);
+        if !child_empty {
+            is_empty = false;
+        }
+    }
+
+    if is_empty && (max_results == 0 || results.len() < max_results) {
+        results.push(dir.to_string_lossy().to_string());
+    }
+
+    is_empty
+}
+
+/// Recursively scans `root` for empty directories (descendant directories containing no files or subdirectories).
+/// Ignores `.git` repositories and does not include `root` itself.
+pub fn scan_empty_directories(root: &Path, max_results: usize) -> Result<EmptyDirsReport, String> {
+    if !root.exists() || !root.is_dir() {
+        return Err("root path does not exist or is not a directory".into());
+    }
+
+    let started = Instant::now();
+    let mut empty_dirs = Vec::new();
+    let mut scanned_dirs = 0usize;
+
+    if let Ok(read) = fs::read_dir(root) {
+        for entry in read.filter_map(|e| e.ok()) {
+            if let Ok(ft) = entry.file_type() {
+                if ft.is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !name.starts_with(".git") {
+                        find_empty_dirs_recursive(&entry.path(), max_results, &mut empty_dirs, &mut scanned_dirs);
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort deeper paths first (longest path length first)
+    empty_dirs.sort_by_key(|p| std::cmp::Reverse(p.len()));
+
+    Ok(EmptyDirsReport {
+        root_path: root.to_string_lossy().to_string(),
+        empty_dirs,
+        scanned_dirs,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+/// Cleans the specified empty directory paths from disk.
+pub fn clean_empty_directories(paths: &[String]) -> EmptyDirsCleanResult {
+    let mut removed_count = 0;
+    let mut failed_count = 0;
+    let mut errors = Vec::new();
+
+    let mut sorted = paths.to_vec();
+    sorted.sort_by_key(|p| std::cmp::Reverse(p.len()));
+
+    for p in sorted {
+        let path = Path::new(&p);
+        if path.is_dir() {
+            match fs::remove_dir(path) {
+                Ok(_) => removed_count += 1,
+                Err(e) => {
+                    failed_count += 1;
+                    errors.push(format!("{p}: {e}"));
+                }
+            }
+        }
+    }
+
+    EmptyDirsCleanResult {
+        removed_count,
+        failed_count,
+        errors,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs::File;
     use std::io::Write;
+
+    #[test]
+    fn test_empty_directories_scan_and_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let empty_a = tmp.path().join("level1").join("empty_nested");
+        let non_empty = tmp.path().join("has_file");
+        fs::create_dir_all(&empty_a).unwrap();
+        fs::create_dir_all(&non_empty).unwrap();
+        let _ = File::create(non_empty.join("hello.txt")).unwrap();
+
+        let report = scan_empty_directories(tmp.path(), 0).unwrap();
+        assert_eq!(report.empty_dirs.len(), 2); // level1 and level1/empty_nested
+        assert!(report.empty_dirs[0].contains("empty_nested")); // deepest first
+
+        let clean_res = clean_empty_directories(&report.empty_dirs);
+        assert_eq!(clean_res.removed_count, 2);
+        assert_eq!(clean_res.failed_count, 0);
+
+        assert!(!empty_a.exists());
+        assert!(!tmp.path().join("level1").exists());
+        assert!(non_empty.exists());
+        assert!(non_empty.join("hello.txt").exists());
+    }
 
     #[test]
     fn test_janitor_scan_and_clean() {

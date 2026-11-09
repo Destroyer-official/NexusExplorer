@@ -4,6 +4,7 @@ import "@/styles/tailwind.css";
 import "@/styles/tokens.css";
 import "@/styles/base.css";
 import "@/styles/layout.css";
+import "@/styles/glass.css";
 import App from "@/App";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { useAppStore } from "@/state/store";

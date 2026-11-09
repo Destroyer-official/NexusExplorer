@@ -597,11 +597,13 @@ mod tests {
 
     #[test]
     fn test_find_git_repo_root() {
-        let cwd = std::env::current_dir().unwrap();
-        let root = find_git_repo_root(&cwd);
-        assert!(root.is_some());
-        let root = root.unwrap();
-        assert!(root.join(".git").exists());
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("fixture");
+        let nested = repo.join("src").join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir(repo.join(".git")).unwrap();
+        assert_eq!(find_git_repo_root(&nested), Some(repo.clone()));
+        assert_eq!(find_git_repo_root(&repo), Some(repo));
     }
 
     #[test]

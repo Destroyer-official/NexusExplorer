@@ -65,7 +65,64 @@ pub fn preview_file(path: &str, max_bytes: u32) -> CoreResult<PreviewData> {
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     let size = metadata.len();
-    let (kind, mime) = classify(&ext);
+    let (mut kind, mime) = classify(&ext);
+
+    // If extension was unmapped or mapped to Binary, attempt content sniffing fallback
+    let mut sniffed_mime = String::new();
+    if kind == PreviewKind::Binary {
+        if let Ok(sniff) = crate::tools::sniffer::sniff_file(path) {
+            if !sniff.is_unknown {
+                let m = sniff.detected_mime.as_str();
+                if m.starts_with("image/") {
+                    kind = PreviewKind::Image;
+                    sniffed_mime = sniff.detected_mime;
+                } else if m == "application/pdf" {
+                    kind = PreviewKind::Pdf;
+                    sniffed_mime = sniff.detected_mime;
+                } else if m.starts_with("audio/") {
+                    kind = PreviewKind::Audio;
+                    sniffed_mime = sniff.detected_mime;
+                } else if m.starts_with("video/") {
+                    kind = PreviewKind::Video;
+                    sniffed_mime = sniff.detected_mime;
+                } else if m == "application/zip"
+                    || m == "application/vnd.rar"
+                    || m == "application/x-7z-compressed"
+                    || m == "application/gzip"
+                    || m == "application/x-bzip2"
+                    || m == "application/x-xz"
+                    || m == "application/zstd"
+                    || m == "application/x-tar"
+                {
+                    kind = PreviewKind::Archive;
+                    sniffed_mime = sniff.detected_mime;
+                }
+            }
+        }
+
+        // If still Binary (e.g. extensionless scripts, LICENSE, Makefile, .env, README, hosts),
+        // test whether the content is valid UTF-8/ASCII text without NUL bytes.
+        if kind == PreviewKind::Binary {
+            if let Ok(preview) = read_text_file(path, max_bytes.min(DEFAULT_TEXT_LIMIT)) {
+                return Ok(PreviewData {
+                    path: path.to_string(),
+                    kind: PreviewKind::Text,
+                    mime: "text/plain".into(),
+                    size,
+                    truncated: size > max_bytes as u64,
+                    text: Some(preview.content),
+                    width: None,
+                    height: None,
+                });
+            }
+        }
+    }
+
+    let final_mime = if !sniffed_mime.is_empty() {
+        sniffed_mime
+    } else {
+        mime.to_string()
+    };
 
     let text = if kind == PreviewKind::Text {
         match read_text_file(path, max_bytes.min(DEFAULT_TEXT_LIMIT)) {
@@ -80,7 +137,7 @@ pub fn preview_file(path: &str, max_bytes: u32) -> CoreResult<PreviewData> {
     Ok(PreviewData {
         path: path.to_string(),
         kind,
-        mime: mime.to_string(),
+        mime: final_mime,
         size,
         truncated,
         text,
@@ -153,6 +210,44 @@ mod tests {
         let binary = dir.join("b.bin");
         fs::write(&binary, [0u8, 1, 2, 3]).unwrap();
         assert!(read_text_file(&binary.to_string_lossy(), 1024).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sniffs_extensionless_files() {
+        let dir = std::env::temp_dir().join(format!("nexus-sniff-preview-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        // 1. Extensionless text file (e.g. LICENSE or Makefile)
+        let license = dir.join("LICENSE");
+        fs::write(&license, b"MIT License\nCopyright 2027 NexusExplorer").unwrap();
+        let p_license = preview_file(&license.to_string_lossy(), DEFAULT_TEXT_LIMIT).unwrap();
+        assert_eq!(p_license.kind, PreviewKind::Text);
+        assert_eq!(p_license.mime, "text/plain");
+        assert!(p_license.text.as_deref().unwrap().contains("MIT License"));
+
+        // 2. Extensionless PNG image
+        let img = dir.join("image_without_ext");
+        let png_bytes = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0, 0, 0, 0];
+        fs::write(&img, png_bytes).unwrap();
+        let p_img = preview_file(&img.to_string_lossy(), DEFAULT_TEXT_LIMIT).unwrap();
+        assert_eq!(p_img.kind, PreviewKind::Image);
+        assert_eq!(p_img.mime, "image/png");
+
+        // 3. Extensionless PDF
+        let pdf = dir.join("doc_without_ext");
+        fs::write(&pdf, b"%PDF-1.7\nsome pdf payload").unwrap();
+        let p_pdf = preview_file(&pdf.to_string_lossy(), DEFAULT_TEXT_LIMIT).unwrap();
+        assert_eq!(p_pdf.kind, PreviewKind::Pdf);
+        assert_eq!(p_pdf.mime, "application/pdf");
+
+        // 4. Extensionless compiled binary (with NUL bytes and unknown magic)
+        let bin = dir.join("custom_binary");
+        fs::write(&bin, [0x01, 0x02, 0x00, 0x03, 0xff, 0xfe]).unwrap();
+        let p_bin = preview_file(&bin.to_string_lossy(), DEFAULT_TEXT_LIMIT).unwrap();
+        assert_eq!(p_bin.kind, PreviewKind::Binary);
+        assert!(p_bin.text.is_none());
+
         fs::remove_dir_all(&dir).unwrap();
     }
 }

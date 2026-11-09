@@ -47,7 +47,7 @@ const PROFILES: ProfileConfig[] = [
   {
     id: "media",
     name: "Media & Creative Studio",
-    description: "Grid visual gallery, 3D viewport and audio waveforms active, grouped by file type.",
+    description: "Grid view with file previews, sorted by name.",
     icon: <Film className="w-5 h-5 text-purple-400" />,
     accent: "border-purple-500/30 bg-purple-500/5",
     settings: {
@@ -81,7 +81,7 @@ const PROFILES: ProfileConfig[] = [
   {
     id: "zen",
     name: "Minimalist & Focus",
-    description: "Distraction-free single pane, sidebar tucked away, document AI summarizer pane active.",
+    description: "Single pane with the sidebar hidden and file preview visible.",
     icon: <Feather className="w-5 h-5 text-emerald-400" />,
     accent: "border-emerald-500/30 bg-emerald-500/5",
     settings: {
@@ -132,7 +132,7 @@ export const WorkspaceProfilesModal: React.FC<WorkspaceProfilesModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div role="dialog" aria-modal="true" aria-label="Workspace profiles" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="flex flex-col w-full max-w-2xl bg-[#18181b] border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden text-zinc-100">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/60">

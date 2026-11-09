@@ -51,7 +51,7 @@ export function DlpScannerModal({ isOpen, onClose, targetPaths = [] }: Props) {
   return (
     <div className="palette-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
       <div
-        className="palette"
+        className="palette" role="dialog" aria-modal="true" aria-label="Secret scanner"
         onClick={(e) => e.stopPropagation()}
         style={{ width: 720, maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 0 }}
       >
@@ -70,7 +70,7 @@ export function DlpScannerModal({ isOpen, onClose, targetPaths = [] }: Props) {
             <button className="icon-btn" onClick={handleScan} disabled={scanning} title="Rescan">
               <RefreshCw size={14} className={scanning ? "spin" : ""} />
             </button>
-            <button className="icon-btn" onClick={onClose}>
+            <button className="icon-btn" aria-label="Close secret scanner" onClick={onClose}>
               <X size={16} />
             </button>
           </div>
