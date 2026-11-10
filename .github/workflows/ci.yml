@@ -1,0 +1,55 @@
+name: Nexus Explorer CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-verify:
+    name: Test & Static Analysis (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js (v20)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          components: clippy, rustfmt
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: TypeScript Strict Typecheck
+        run: npm run typecheck
+
+      - name: Frontend Vitest Test Suite
+        run: npm run test
+
+      - name: Rust Clippy Linter (Strict Zero Warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust Core Engine Unit Tests
+        run: cargo test -p nexus-core --lib
+
+      - name: Rust Automation CLI Unit Tests
+        run: cargo test -p nexus-cli
+
+      - name: Build Web Application Assets
+        run: npm run build
+
+      - name: Compile Release Binaries (CLI & C-ABI)
+        run: cargo build --release -p nexus-cli -p nexus_engine_ffi
