@@ -53,3 +53,4 @@ jobs:
 
       - name: Compile Release Binaries (CLI & C-ABI)
         run: cargo build --release -p nexus-cli -p nexus_engine_ffi
+

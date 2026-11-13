@@ -77,3 +77,4 @@ cargo test -p nexus-cli
 3. Run the verification battery to ensure 100% test pass rate.
 4. Commit your changes with a descriptive conventional commit message.
 5. Push to your fork and submit a Pull Request against `main`.
+

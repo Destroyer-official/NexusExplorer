@@ -30,3 +30,4 @@ If you discover a security vulnerability in Nexus Explorer, please **do not** op
 * **Initial Response**: Within 48 hours of receipt.
 * **Triage & Assessment**: Within 7 business days.
 * **Public Disclosure**: Coordinated release and CVE assignment after patch verification and deployment.
+

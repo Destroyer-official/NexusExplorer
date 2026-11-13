@@ -18,3 +18,4 @@ Describe the changes proposed in this Pull Request and the problem they solve.
 - [ ] Rust core unit tests pass (`cargo test -p nexus-core --lib`)
 - [ ] New unit tests added covering modified functionality
 - [ ] Documentation updated in `docs/` and `distinct tools & specialized subsystems.md` if adding a new feature
+

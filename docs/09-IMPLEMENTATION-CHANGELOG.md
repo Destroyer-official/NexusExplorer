@@ -51,8 +51,11 @@
 - **High-Productivity Orthodox Navigation (`src/components/FileList.tsx`):**
   - **Insert Selection Mode:** Added `Insert` key handling to toggle item selection and automatically advance focus to the next item, enabling rapid single-handed multi-selection without holding `Ctrl`.
   - **Page Scrolling Acceleration:** Integrated `PageUp` and `PageDown` virtual viewport jumping.
-- **Calculate All Visible Folder Sizes (`src/state/store.ts`, `src/hooks/useShortcuts.ts`):**
+- **Calculate All Visible Folder Sizes (`src/state/store.ts`, `src/hooks/useShortcuts.ts`, `crates/nexus-core/src/fs/folder_size.rs`):**
   - Added `calculateAllVisibleFolderSizes()` bound to `Alt+Shift+Enter` (Total Commander orthodox standard), scheduling asynchronous background folder size analysis across all directory entries in the active viewport with non-blocking UI feedback.
+  - Accelerated `calculate_folder_size` using `jwalk` parallel work-stealing threadpool, delivering multi-threaded folder capacity summation across NVMe PCIe storage without UI thread stalls.
+- **Zero-Allocation Flat Branch Sorter (`crates/nexus-core/src/tools/flat.rs`):**
+  - Replaced $O(N \log N)$ temporary string heap allocations in `list_flat_branch` with zero-allocation char-iterator case-insensitive lexicographical comparisons (`.chars().map(|c| c.to_ascii_lowercase()).cmp(...)`), eliminating hundreds of thousands of heap reallocations during large branch sweeps.
 - **Automated Test Battery Expansion:**
   - Expanded frontend Vitest coverage to 141 tests across 18 test files with 100% pass rate.
   - Total repository-wide automated verification suite: 275 passing tests (121 Rust Core + 11 Rust CLI + 141 Vitest + 2 Integration suites).

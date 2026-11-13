@@ -99,8 +99,9 @@ pub fn list_flat_branch(
 
     entries.sort_by(|a, b| {
         a.relative_path
-            .to_lowercase()
-            .cmp(&b.relative_path.to_lowercase())
+            .chars()
+            .map(|c| c.to_ascii_lowercase())
+            .cmp(b.relative_path.chars().map(|c| c.to_ascii_lowercase()))
     });
 
     Ok(FlatListing {
